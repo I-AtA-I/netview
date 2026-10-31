@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -19,10 +20,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from netview.capture import LiveCaptureError, list_interfaces
 from netview.core.pipeline import ProcessedPacket
 from netview.filters import FilterSyntaxError
 from netview.gui.table_model import PacketTableModel
 
+from .live_worker import LiveCaptureWorker
 from .worker import CaptureLoadWorker
 
 
@@ -124,11 +127,16 @@ class MainWindow(QMainWindow):
 
         self.model = PacketTableModel(self)
         self._worker: CaptureLoadWorker | None = None
+        self._live_worker: LiveCaptureWorker | None = None
+        self._live_interface: str | None = None
+        self._live_capture_error = False
         self._current_path: Path | None = None
         self._selected_packet: ProcessedPacket | None = None
 
         self._build_actions()
         self._build_ui()
+        self.refresh_interfaces()
+        self._update_capture_controls()
         self._update_counts()
 
     def _build_actions(self) -> None:
@@ -143,6 +151,15 @@ class MainWindow(QMainWindow):
         self.close_action.setShortcut(QKeySequence("Ctrl+W"))
         self.close_action.triggered.connect(self.close_capture)
         file_menu.addAction(self.close_action)
+
+        capture_menu = self.menuBar().addMenu("&Capture")
+        self.start_capture_action = QAction("Start live capture", self)
+        self.start_capture_action.triggered.connect(self.start_live_capture)
+        capture_menu.addAction(self.start_capture_action)
+
+        self.stop_capture_action = QAction("Stop live capture", self)
+        self.stop_capture_action.triggered.connect(self.stop_live_capture)
+        capture_menu.addAction(self.stop_capture_action)
 
         file_menu.addSeparator()
         exit_action = QAction("Exit", self)
@@ -171,6 +188,31 @@ class MainWindow(QMainWindow):
         self.file_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         heading.addWidget(self.file_label)
         root.addLayout(heading)
+
+        capture_row = QHBoxLayout()
+        capture_row.setSpacing(8)
+        capture_label = QLabel("Interface")
+        capture_label.setStyleSheet("color: #bdb2ca; font-weight: 600;")
+        self.interface_combo = QComboBox()
+        self.interface_combo.setMinimumWidth(220)
+        self.interface_combo.setToolTip(
+            "Select one local interface you own or are authorized to monitor."
+        )
+        self.refresh_interfaces_button = QPushButton("Refresh")
+        self.refresh_interfaces_button.clicked.connect(self.refresh_interfaces)
+        self.start_capture_button = QPushButton("Start capture")
+        self.start_capture_button.clicked.connect(self.start_live_capture)
+        self.stop_capture_button = QPushButton("Stop")
+        self.stop_capture_button.clicked.connect(self.stop_live_capture)
+        self.capture_state_label = QLabel("Live capture stopped · promiscuous mode off")
+        self.capture_state_label.setStyleSheet("color: #847a90; font-size: 9pt;")
+        capture_row.addWidget(capture_label)
+        capture_row.addWidget(self.interface_combo)
+        capture_row.addWidget(self.refresh_interfaces_button)
+        capture_row.addWidget(self.start_capture_button)
+        capture_row.addWidget(self.stop_capture_button)
+        capture_row.addWidget(self.capture_state_label, 1)
+        root.addLayout(capture_row)
 
         filter_row = QHBoxLayout()
         filter_label = QLabel("Display filter")
@@ -257,6 +299,8 @@ class MainWindow(QMainWindow):
     def load_capture(self, filename: str | Path) -> None:
         if self._worker is not None and self._worker.isRunning():
             return
+        if self._live_worker is not None and self._live_worker.isRunning():
+            return
 
         path = Path(filename).expanduser()
         self._current_path = path
@@ -280,6 +324,7 @@ class MainWindow(QMainWindow):
         self._worker.finished.connect(self._on_worker_thread_finished)
         self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
+        self._update_capture_controls()
 
     def _on_packet_batch(self, packets: list[ProcessedPacket]) -> None:
         self.model.append_packets(packets)
@@ -306,11 +351,123 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Could not read capture", message)
 
     def _set_loading_state(self, loading: bool) -> None:
-        self.open_action.setEnabled(not loading)
-        self.close_action.setEnabled(not loading and self.model.total_count > 0)
         self.filter_input.setEnabled(not loading)
         self.apply_button.setEnabled(not loading)
         self.clear_filter_button.setEnabled(not loading)
+        self._update_capture_controls()
+
+    def _update_capture_controls(self) -> None:
+        loading = self._worker is not None
+        capturing = self._live_worker is not None
+        idle = not loading and not capturing
+        has_interfaces = self.interface_combo.count() > 0
+
+        self.interface_combo.setEnabled(idle)
+        self.refresh_interfaces_button.setEnabled(idle)
+        self.start_capture_button.setEnabled(idle and has_interfaces)
+        self.stop_capture_button.setEnabled(capturing)
+        self.start_capture_action.setEnabled(idle and has_interfaces)
+        self.stop_capture_action.setEnabled(capturing)
+        self.open_action.setEnabled(idle)
+        self.close_action.setEnabled(idle and self.model.total_count > 0)
+
+    def refresh_interfaces(self) -> None:
+        current = self.interface_combo.currentText()
+        try:
+            interfaces = list_interfaces()
+        except LiveCaptureError as exc:
+            self.interface_combo.clear()
+            self.capture_state_label.setText("Could not list interfaces")
+            self.statusBar().showMessage(str(exc))
+            self._update_capture_controls()
+            return
+
+        self.interface_combo.clear()
+        self.interface_combo.addItems(interfaces)
+        if current and current in interfaces:
+            self.interface_combo.setCurrentText(current)
+
+        if interfaces:
+            self.capture_state_label.setText(
+                "Ready · capture only on an authorized interface · promiscuous mode off"
+            )
+        else:
+            self.capture_state_label.setText("No network interfaces found")
+
+        self._update_capture_controls()
+
+    def start_live_capture(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
+        if self._live_worker is not None and self._live_worker.isRunning():
+            return
+
+        interface = self.interface_combo.currentText().strip()
+        if not interface:
+            QMessageBox.warning(self, "No interface selected", "Select a network interface first.")
+            return
+
+        self.model.clear()
+        self._clear_packet_details()
+        self.filter_input.clear()
+        self.filter_input.setStyleSheet("")
+        self._current_path = None
+        self._live_interface = interface
+        self._live_capture_error = False
+        self.file_label.setText(f"Live capture · {interface}")
+        self.filter_status.setStyleSheet("color: #9b8eaa; font-size: 9pt;")
+        self.filter_status.setText("Capturing live packets. Enter a display filter or leave it empty.")
+
+        self._live_worker = LiveCaptureWorker(interface, self)
+        self._live_worker.batch_ready.connect(self._on_live_packet_batch)
+        self._live_worker.capture_failed.connect(self._on_live_capture_failed)
+        self._live_worker.finished.connect(self._on_live_capture_finished)
+        self._live_worker.finished.connect(self._live_worker.deleteLater)
+
+        self.capture_state_label.setText(f"Capturing on {interface} · promiscuous mode off")
+        self.statusBar().showMessage(f"Starting live capture on {interface}…")
+        self._live_worker.start()
+        self._update_capture_controls()
+
+    def stop_live_capture(self) -> None:
+        if self._live_worker is None or not self._live_worker.isRunning():
+            return
+
+        self.stop_capture_button.setEnabled(False)
+        self.stop_capture_action.setEnabled(False)
+        self.capture_state_label.setText("Stopping live capture…")
+        self.statusBar().showMessage("Stopping live capture…")
+        self._live_worker.stop()
+
+    def _on_live_packet_batch(self, packets: list[ProcessedPacket]) -> None:
+        self.model.append_packets(packets)
+        self._update_counts()
+        interface = self._live_interface or "interface"
+        self.statusBar().showMessage(
+            f"Capturing on {interface} · {self.model.total_count:,} packets"
+        )
+
+    def _on_live_capture_failed(self, message: str) -> None:
+        self._live_capture_error = True
+        self.capture_state_label.setText("Live capture failed")
+        self.filter_status.setStyleSheet("color: #e18b91; font-size: 9pt;")
+        self.filter_status.setText(f"Live capture error: {message}")
+        self.statusBar().showMessage("Live capture failed")
+        QMessageBox.critical(self, "Live capture failed", message)
+
+    def _on_live_capture_finished(self) -> None:
+        interface = self._live_interface or "interface"
+        self._live_worker = None
+        self._update_capture_controls()
+
+        if not self._live_capture_error:
+            self.capture_state_label.setText(f"Stopped · {self.model.total_count:,} packets captured")
+            self.statusBar().showMessage(
+                f"Live capture stopped on {interface} · {self.model.total_count:,} packets"
+            )
+
+        if self.model.total_count:
+            self.file_label.setText(f"Live capture · {interface} (stopped)")
 
     def apply_filter(self) -> None:
         expression = self.filter_input.text()
@@ -342,8 +499,11 @@ class MainWindow(QMainWindow):
     def close_capture(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             return
+        if self._live_worker is not None and self._live_worker.isRunning():
+            return
         self.model.clear()
         self._current_path = None
+        self._live_interface = None
         self.file_label.setText("No capture loaded")
         self.filter_input.clear()
         self.filter_status.setText(
@@ -353,7 +513,9 @@ class MainWindow(QMainWindow):
         self._clear_packet_details()
         self._set_loading_state(False)
         self.close_action.setEnabled(False)
+        self.capture_state_label.setText("Live capture stopped · promiscuous mode off")
         self.statusBar().showMessage("Capture closed")
+        self._update_capture_controls()
         self._update_counts()
 
     def _on_selection_changed(self, *_args) -> None:
@@ -505,6 +667,9 @@ class MainWindow(QMainWindow):
         if self._worker is not None and self._worker.isRunning():
             self._worker.requestInterruption()
             self._worker.wait()
+        if self._live_worker is not None and self._live_worker.isRunning():
+            self._live_worker.stop()
+            self._live_worker.wait()
         event.accept()
 
     def _update_counts(self) -> None:
