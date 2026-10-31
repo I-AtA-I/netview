@@ -1,0 +1,513 @@
+from pathlib import Path
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction, QFont, QKeySequence
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QSplitter,
+    QTableView,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from netview.core.pipeline import ProcessedPacket
+from netview.filters import FilterSyntaxError
+from netview.gui.table_model import PacketTableModel
+
+from .worker import CaptureLoadWorker
+
+
+APP_STYLE = """
+QMainWindow, QWidget {
+    background: #15131b;
+    color: #e7e2ed;
+    font-family: "Inter", "Noto Sans", sans-serif;
+    font-size: 10pt;
+}
+QMenuBar, QMenu {
+    background: #1c1923;
+    color: #e7e2ed;
+}
+QMenuBar::item:selected, QMenu::item:selected {
+    background: #393047;
+}
+QToolBar {
+    background: #1c1923;
+    border: none;
+    spacing: 8px;
+    padding: 7px;
+}
+QLineEdit, QPlainTextEdit, QTreeWidget, QTableView {
+    background: #100e15;
+    color: #e7e2ed;
+    border: 1px solid #302a3a;
+    border-radius: 5px;
+    selection-background-color: #49385f;
+    selection-color: #ffffff;
+}
+QLineEdit {
+    padding: 8px 10px;
+}
+QLineEdit:focus, QPlainTextEdit:focus, QTreeWidget:focus, QTableView:focus {
+    border: 1px solid #9275b8;
+}
+QPushButton {
+    background: #30283b;
+    color: #eee8f6;
+    border: 1px solid #493d59;
+    border-radius: 5px;
+    padding: 7px 13px;
+}
+QPushButton:hover {
+    background: #40344f;
+}
+QPushButton:pressed {
+    background: #514064;
+}
+QPushButton:disabled {
+    color: #77717f;
+    background: #211e27;
+}
+QHeaderView::section {
+    background: #211d29;
+    color: #c9bfd7;
+    border: none;
+    border-right: 1px solid #302a3a;
+    border-bottom: 1px solid #393142;
+    padding: 8px 7px;
+    font-weight: 600;
+}
+QTableView {
+    gridline-color: #282330;
+    alternate-background-color: #17141e;
+}
+QTableView::item {
+    padding: 5px;
+}
+QTreeWidget::item {
+    padding: 3px;
+}
+QStatusBar {
+    background: #1c1923;
+    color: #aaa1b5;
+    border-top: 1px solid #302a3a;
+}
+QSplitter::handle {
+    background: #302a3a;
+}
+QSplitter::handle:horizontal {
+    width: 4px;
+}
+QSplitter::handle:vertical {
+    height: 4px;
+}
+"""
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("NetView — Network Protocol Analyzer")
+        self.resize(1440, 900)
+        self.setMinimumSize(980, 620)
+        self.setStyleSheet(APP_STYLE)
+        self.setAcceptDrops(True)
+
+        self.model = PacketTableModel(self)
+        self._worker: CaptureLoadWorker | None = None
+        self._current_path: Path | None = None
+        self._selected_packet: ProcessedPacket | None = None
+
+        self._build_actions()
+        self._build_ui()
+        self._update_counts()
+
+    def _build_actions(self) -> None:
+        file_menu = self.menuBar().addMenu("&File")
+
+        self.open_action = QAction("Open capture…", self)
+        self.open_action.setShortcut(QKeySequence.StandardKey.Open)
+        self.open_action.triggered.connect(self.open_capture_dialog)
+        file_menu.addAction(self.open_action)
+
+        self.close_action = QAction("Close capture", self)
+        self.close_action.setShortcut(QKeySequence("Ctrl+W"))
+        self.close_action.triggered.connect(self.close_capture)
+        file_menu.addAction(self.close_action)
+
+        file_menu.addSeparator()
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+    def _build_ui(self) -> None:
+        central = QWidget(self)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(9)
+
+        heading = QHBoxLayout()
+        title = QLabel("NetView")
+        title.setStyleSheet("font-size: 18pt; font-weight: 700; color: #f0eaf8;")
+        subtitle = QLabel("NETWORK PROTOCOL ANALYZER")
+        subtitle.setStyleSheet("font-size: 8pt; letter-spacing: 1px; color: #9b8eaa;")
+        heading.addWidget(title)
+        heading.addSpacing(10)
+        heading.addWidget(subtitle)
+        heading.addStretch(1)
+
+        self.file_label = QLabel("No capture loaded")
+        self.file_label.setStyleSheet("color: #a99db7;")
+        self.file_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        heading.addWidget(self.file_label)
+        root.addLayout(heading)
+
+        filter_row = QHBoxLayout()
+        filter_label = QLabel("Display filter")
+        filter_label.setStyleSheet("color: #bdb2ca; font-weight: 600;")
+        self.filter_input = QLineEdit()
+        self.filter_input.setPlaceholderText(
+            "e.g. tcp.port == 443 or udp.port == 53"
+        )
+        self.filter_input.returnPressed.connect(self.apply_filter)
+        self.apply_button = QPushButton("Apply")
+        self.apply_button.clicked.connect(self.apply_filter)
+        self.clear_filter_button = QPushButton("Clear")
+        self.clear_filter_button.clicked.connect(self.clear_filter)
+        filter_row.addWidget(filter_label)
+        filter_row.addWidget(self.filter_input, 1)
+        filter_row.addWidget(self.apply_button)
+        filter_row.addWidget(self.clear_filter_button)
+        root.addLayout(filter_row)
+
+        self.filter_status = QLabel("Filters: tcp, udp, ip.src, ip.dst, ports, flags, frame length")
+        self.filter_status.setStyleSheet("color: #847a90; font-size: 9pt;")
+        root.addWidget(self.filter_status)
+
+        self.packet_table = QTableView()
+        self.packet_table.setModel(self.model)
+        self.packet_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.packet_table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.packet_table.setAlternatingRowColors(True)
+        self.packet_table.setShowGrid(False)
+        self.packet_table.setSortingEnabled(False)
+        self.packet_table.verticalHeader().setVisible(False)
+        self.packet_table.horizontalHeader().setStretchLastSection(True)
+        self.packet_table.setColumnWidth(0, 70)
+        self.packet_table.setColumnWidth(1, 145)
+        self.packet_table.setColumnWidth(2, 170)
+        self.packet_table.setColumnWidth(3, 170)
+        self.packet_table.setColumnWidth(4, 100)
+        self.packet_table.setColumnWidth(5, 85)
+        self.packet_table.selectionModel().selectionChanged.connect(
+            self._on_selection_changed
+        )
+
+        self.details_tree = QTreeWidget()
+        self.details_tree.setHeaderLabels(["Packet details", "Value"])
+        self.details_tree.setColumnWidth(0, 255)
+        self.details_tree.setAlternatingRowColors(True)
+
+        self.hex_view = QPlainTextEdit()
+        self.hex_view.setReadOnly(True)
+        self.hex_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.hex_view.setPlaceholderText("Select a packet to inspect its bytes.")
+        self.hex_view.setFont(QFont("monospace", 9))
+
+        lower_splitter = QSplitter(Qt.Orientation.Horizontal)
+        lower_splitter.addWidget(self.details_tree)
+        lower_splitter.addWidget(self.hex_view)
+        lower_splitter.setStretchFactor(0, 1)
+        lower_splitter.setStretchFactor(1, 1)
+
+        main_splitter = QSplitter(Qt.Orientation.Vertical)
+        main_splitter.addWidget(self.packet_table)
+        main_splitter.addWidget(lower_splitter)
+        main_splitter.setStretchFactor(0, 3)
+        main_splitter.setStretchFactor(1, 2)
+        main_splitter.setSizes([540, 300])
+        root.addWidget(main_splitter, 1)
+
+        self.setCentralWidget(central)
+        self.count_status = QLabel("0 displayed / 0 total")
+        self.count_status.setStyleSheet("color: #b7a9c7; padding: 0 8px;")
+        self.statusBar().addPermanentWidget(self.count_status)
+        self.statusBar().showMessage("Ready — open a PCAP or PCAPNG file")
+
+    def open_capture_dialog(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open packet capture",
+            str(Path.home()),
+            "Capture files (*.pcap *.pcapng *.cap);;All files (*)",
+        )
+        if filename:
+            self.load_capture(filename)
+
+    def load_capture(self, filename: str | Path) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
+
+        path = Path(filename).expanduser()
+        self._current_path = path
+        self.file_label.setText(path.name)
+        self.model.clear()
+        self._clear_packet_details()
+        self.filter_input.clear()
+        self.filter_input.setEnabled(False)
+        self.apply_button.setEnabled(False)
+        self.clear_filter_button.setEnabled(False)
+        self.open_action.setEnabled(False)
+        self.close_action.setEnabled(False)
+        self.filter_status.setStyleSheet("color: #847a90; font-size: 9pt;")
+        self.filter_status.setText("Loading capture…")
+        self.statusBar().showMessage(f"Loading {path}…")
+
+        self._worker = CaptureLoadWorker(path, self)
+        self._worker.batch_ready.connect(self._on_packet_batch)
+        self._worker.load_finished.connect(self._on_load_finished)
+        self._worker.load_failed.connect(self._on_load_failed)
+        self._worker.finished.connect(self._on_worker_thread_finished)
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._worker.start()
+
+    def _on_packet_batch(self, packets: list[ProcessedPacket]) -> None:
+        self.model.append_packets(packets)
+        self.statusBar().showMessage(
+            f"Loading… {self.model.total_count:,} packets processed"
+        )
+        self._update_counts()
+
+    def _on_load_finished(self, count: int) -> None:
+        self.filter_status.setText("Capture loaded. Enter a display filter or leave it empty.")
+        self.statusBar().showMessage(
+            f"Loaded {count:,} packets from {self._current_path.name if self._current_path else 'capture'}"
+        )
+        self._update_counts()
+
+    def _on_worker_thread_finished(self) -> None:
+        self._worker = None
+        self._set_loading_state(False)
+
+    def _on_load_failed(self, message: str) -> None:
+        self.filter_status.setText("Capture loading failed.")
+        self.filter_status.setStyleSheet("color: #e18b91; font-size: 9pt;")
+        self.statusBar().showMessage("Capture loading failed")
+        QMessageBox.critical(self, "Could not read capture", message)
+
+    def _set_loading_state(self, loading: bool) -> None:
+        self.open_action.setEnabled(not loading)
+        self.close_action.setEnabled(not loading and self.model.total_count > 0)
+        self.filter_input.setEnabled(not loading)
+        self.apply_button.setEnabled(not loading)
+        self.clear_filter_button.setEnabled(not loading)
+
+    def apply_filter(self) -> None:
+        expression = self.filter_input.text()
+        try:
+            visible = self.model.apply_filter(expression)
+        except FilterSyntaxError as exc:
+            self.filter_input.setStyleSheet(
+                "QLineEdit { border: 1px solid #c66b75; background: #21151c; }"
+            )
+            self.filter_status.setStyleSheet("color: #e18b91; font-size: 9pt;")
+            self.filter_status.setText(f"Invalid filter: {exc}")
+            return
+
+        self.filter_input.setStyleSheet("")
+        self.filter_status.setStyleSheet("color: #9b8eaa; font-size: 9pt;")
+        if expression.strip():
+            self.filter_status.setText(
+                f"Filter matched {visible:,} of {self.model.total_count:,} packets"
+            )
+        else:
+            self.filter_status.setText("Displaying all packets")
+        self._clear_packet_details()
+        self._update_counts()
+
+    def clear_filter(self) -> None:
+        self.filter_input.clear()
+        self.apply_filter()
+
+    def close_capture(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
+        self.model.clear()
+        self._current_path = None
+        self.file_label.setText("No capture loaded")
+        self.filter_input.clear()
+        self.filter_status.setText(
+            "Filters: tcp, udp, ip.src, ip.dst, ports, flags, frame length"
+        )
+        self.filter_status.setStyleSheet("color: #847a90; font-size: 9pt;")
+        self._clear_packet_details()
+        self._set_loading_state(False)
+        self.close_action.setEnabled(False)
+        self.statusBar().showMessage("Capture closed")
+        self._update_counts()
+
+    def _on_selection_changed(self, *_args) -> None:
+        index = self.packet_table.currentIndex()
+        packet = self.model.packet_at(index.row()) if index.isValid() else None
+        if packet is None:
+            self._clear_packet_details()
+            return
+        self._show_packet_details(packet)
+
+    def _clear_packet_details(self) -> None:
+        self._selected_packet = None
+        self.details_tree.clear()
+        self.hex_view.clear()
+
+    def _show_packet_details(self, packet: ProcessedPacket) -> None:
+        self._selected_packet = packet
+        self.details_tree.clear()
+
+        record = packet.record
+        result = packet.dissection
+
+        self._add_section("Frame", [
+            ("Packet number", record.number),
+            ("Timestamp", record.timestamp if record.timestamp is not None else "Unavailable"),
+            ("Captured length", f"{record.captured_length} bytes"),
+            ("Original length", f"{record.original_length} bytes"),
+            ("Link type", record.link_type),
+        ])
+
+        if result.ethernet is not None:
+            eth = result.ethernet
+            item = self._add_section("Ethernet II", [
+                ("Destination", eth.destination_mac),
+                ("Source", eth.source_mac),
+                ("Type / Length", f"0x{eth.type_or_length:04x}"),
+                ("Payload offset", f"{eth.payload_offset} bytes"),
+            ])
+            for index, tag in enumerate(eth.vlan_tags, start=1):
+                vlan = QTreeWidgetItem(item, [f"802.1Q VLAN tag {index}", ""])
+                self._add_child(vlan, "TPID", f"0x{tag.tpid:04x}")
+                self._add_child(vlan, "VLAN ID", tag.vlan_id)
+                self._add_child(vlan, "Priority", tag.priority)
+                self._add_child(vlan, "Drop eligible", tag.drop_eligible)
+
+        if result.ipv4 is not None:
+            ip = result.ipv4
+            self._add_section("Internet Protocol Version 4", [
+                ("Source address", ip.source_ip),
+                ("Destination address", ip.destination_ip),
+                ("Header length", f"{ip.header_length} bytes"),
+                ("Total length", f"{ip.total_length} bytes"),
+                ("DSCP", ip.dscp),
+                ("ECN", ip.ecn),
+                ("Identification", f"0x{ip.identification:04x}"),
+                ("Reserved flag", ip.reserved_flag),
+                ("Don't fragment", ip.dont_fragment),
+                ("More fragments", ip.more_fragments),
+                ("Fragment offset", f"{ip.fragment_offset * 8} bytes"),
+                ("TTL", ip.ttl),
+                ("Protocol number", ip.protocol),
+                ("Header checksum", f"0x{ip.header_checksum:04x}"),
+                ("Truncated", ip.is_truncated),
+            ])
+
+        if result.tcp is not None:
+            tcp = result.tcp
+            self._add_section("Transmission Control Protocol", [
+                ("Source port", tcp.source_port),
+                ("Destination port", tcp.destination_port),
+                ("Sequence number", tcp.sequence_number),
+                ("Acknowledgment number", tcp.acknowledgment_number),
+                ("Header length", f"{tcp.header_length} bytes"),
+                ("Reserved", tcp.reserved),
+                ("NS", tcp.ns),
+                ("Flags", ", ".join(tcp.active_flags) or "None"),
+                ("Window size", tcp.window_size),
+                ("Checksum", f"0x{tcp.checksum:04x}"),
+                ("Urgent pointer", tcp.urgent_pointer),
+                ("Options", tcp.options.hex(" ") or "None"),
+            ])
+
+        if result.udp is not None:
+            udp = result.udp
+            self._add_section("User Datagram Protocol", [
+                ("Source port", udp.source_port),
+                ("Destination port", udp.destination_port),
+                ("Length", f"{udp.length} bytes"),
+                ("Checksum", f"0x{udp.checksum:04x}"),
+                ("Captured length", f"{udp.captured_length} bytes"),
+                ("Truncated", udp.is_truncated),
+            ])
+
+        if result.errors:
+            self._add_section("Dissection warnings", [
+                (f"Warning {index}", message)
+                for index, message in enumerate(result.errors, start=1)
+            ])
+
+        payload_item = self._add_section("Payload", [
+            ("Captured payload length", f"{len(result.payload)} bytes"),
+        ])
+        if result.payload:
+            self._add_child(payload_item, "Preview", result.payload[:32].hex(" "))
+
+        self.details_tree.expandToDepth(1)
+        self.hex_view.setPlainText(self._format_hex(record.data))
+
+    def _add_section(self, title: str, fields: list[tuple[str, object]]) -> QTreeWidgetItem:
+        section = QTreeWidgetItem(self.details_tree, [title, ""])
+        section.setFlags(section.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+        for name, value in fields:
+            self._add_child(section, name, value)
+        return section
+
+    @staticmethod
+    def _add_child(parent: QTreeWidgetItem, name: str, value: object) -> None:
+        QTreeWidgetItem(parent, [str(name), str(value)])
+
+    @staticmethod
+    def _format_hex(data: bytes) -> str:
+        lines = []
+        for offset in range(0, len(data), 16):
+            chunk = data[offset:offset + 16]
+            hex_part = " ".join(f"{byte:02x}" for byte in chunk)
+            ascii_part = "".join(
+                chr(byte) if 32 <= byte <= 126 else "."
+                for byte in chunk
+            )
+            lines.append(f"{offset:08x}  {hex_part:<47}  |{ascii_part}|")
+        return "\n".join(lines)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:
+        urls = event.mimeData().urls()
+        if not urls:
+            return
+        path = urls[0].toLocalFile()
+        if path:
+            self.load_capture(path)
+            event.acceptProposedAction()
+
+    def closeEvent(self, event) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.requestInterruption()
+            self._worker.wait()
+        event.accept()
+
+    def _update_counts(self) -> None:
+        self.count_status.setText(
+            f"{self.model.visible_count:,} displayed / {self.model.total_count:,} total"
+        )
