@@ -22,7 +22,7 @@ def test_export_csv(tmp_path):
     with path.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     assert rows[0]["number"] == "1"
-    assert rows[0]["protocol"] == "Unknown"
+    assert rows[0]["protocol"] == "IPv4"
 
 
 def test_export_json(tmp_path):
