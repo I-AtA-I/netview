@@ -127,6 +127,19 @@ HTTP Request Lab strips captured Cookie and Authorization headers and only conne
 
 Analytics currently summarizes the loaded capture in memory. Classic PCAP export requires all packets to use the same link type; use CSV or JSON for mixed-linktype captures.
 
+## HTTP proxy
+
+NetView includes a local HTTP proxy for browser-based inspection. Open **Analyze → HTTP Proxy**, start the proxy, then launch the dedicated Chromium profile from the dialog or configure a browser to use `127.0.0.1:<port>`.
+
+- The proxy binds to loopback only; it is not exposed to the local network.
+- Plain HTTP requests are forwarded and summarized in an in-memory history (up to 500 entries).
+- Authorization, Cookie and Set-Cookie values are forwarded as required for normal browsing but are not stored in proxy history.
+- HTTPS currently uses a raw CONNECT tunnel. NetView records the tunnel destination but does not decrypt or inspect HTTPS contents.
+- Chunked request bodies are not supported yet; request bodies are limited to 1 MiB and captured response bodies to 4 MiB.
+- Chromium is launched with a separate NetView profile and loopback proxy bypass disabled for that profile only.
+
+Use the proxy only for systems and traffic you own or are authorized to test. Do not configure other users' browsers or devices without their consent.
+
 ## Current scope and limitations
 
 NetView is an early portfolio project, not a replacement for Wireshark. Application dissection is currently packet-based: a DNS message, HTTP/1.x start line and header block, or TLS record/hello must be sufficiently present in the captured packet. Application messages split across multiple TCP segments are not yet reassembled for application decoding, even though a separate Follow TCP Stream view is available. DNS-over-TLS, DNS-over-HTTPS, HTTP/2 and HTTP/3 are not decoded. HTTP parsing deliberately omits credential-bearing Cookie and Authorization headers and does not parse message bodies. TLS support is metadata-only: NetView does not decrypt TLS application data. TLS 1.3 encrypts most handshake messages after ServerHello, and Encrypted ClientHello (ECH) can hide the server name; in those cases SNI may not be available. Checksum validation, IP fragment reassembly and TCP connection-reuse detection remain future work. TCP stream reconstruction currently groups IPv4 conversations by the endpoint/port tuple; reused tuples within one capture can therefore be combined. IPv4-fragmented TCP packets are excluded until IP fragment reassembly is implemented. Sequence gaps are reported only between observed payload segments, because a missing tail cannot be inferred reliably.
