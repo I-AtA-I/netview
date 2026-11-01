@@ -99,7 +99,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         headers = {}
         for name, value in self.headers.items():
             lower = name.lower()
-            if lower not in _HOP_HEADERS and lower not in _SENSITIVE_HEADERS and lower != "host":
+            if lower not in _HOP_HEADERS and lower != "host":
                 headers[name] = value
         headers["Host"] = target.netloc
         headers["Connection"] = "close"
@@ -116,7 +116,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 self.send_response(response.status, response.reason)
                 for name, value in response.getheaders():
                     lower = name.lower()
-                    if lower not in _HOP_HEADERS and lower not in _SENSITIVE_HEADERS and lower != "content-length":
+                    if lower not in _HOP_HEADERS and lower != "content-length":
                         self.send_header(name, value)
                 self.send_header("Content-Length", str(len(response_body)))
                 self.send_header("Connection", "close")
@@ -206,7 +206,7 @@ class HTTPProxy:
     """Local HTTP proxy with bounded metadata history and opaque HTTPS tunnels."""
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8080):
-        if host not in {"127.0.0.1", "::1", "localhost"}:
+        if host not in {"127.0.0.1", "localhost"}:
             raise ValueError("NetView proxy must bind to loopback only")
         if not 0 <= port <= 65535:
             raise ValueError("Port must be between 0 and 65535")
