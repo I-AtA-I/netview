@@ -17,9 +17,6 @@ NetView is a desktop network protocol analyzer built with Python and PySide6. It
 - Stop live capture without closing the application; captured packets remain available for filtering and inspection.
 - Reassemble IPv4/TCP conversations in both directions, including out-of-order segments, sequence wraparound, overlaps/retransmissions and explicit sequence gaps.
 - Keep promiscuous mode disabled by default.
-- View capture analytics including protocol distribution, top talkers, conversations and packet timeline.
-- Export captures to classic PCAP, CSV or JSON.
-- Open captured HTTP requests in a local-only Request Lab, edit the request and inspect the response.
 - Drag and drop capture files into the application.
 
 ## Requirements
@@ -122,23 +119,6 @@ not tcp
 ```
 
 Supported fields and operators are implemented in `src/netview/filters/engine.py`. The filter engine supports common ARP, IPv4, IPv6, TCP, UDP, ICMP, DNS, HTTP and TLS predicates. String values can be quoted when they contain spaces or filter operators, for example `http.request.uri == "/search?q=netview"`. IPv6 extension headers supported by the dissection engine are Hop-by-Hop Options, Routing, Fragment, AH, Destination Options, Mobility, HIP and Shim6. IPv6 jumbograms are not implemented.
-
-HTTP Request Lab strips captured Cookie and Authorization headers and only connects to localhost/loopback addresses. Requests are limited to 64 KiB and responses to 256 KiB; it is intended for local service testing, not remote request replay.
-
-Analytics currently summarizes the loaded capture in memory. Classic PCAP export requires all packets to use the same link type; use CSV or JSON for mixed-linktype captures.
-
-## HTTP proxy
-
-NetView includes a local HTTP proxy for browser-based inspection. Open **Analyze → HTTP Proxy**, start the proxy, then launch the dedicated Chromium profile from the dialog or configure a browser to use `127.0.0.1:<port>`.
-
-- The proxy binds to loopback only; it is not exposed to the local network.
-- Plain HTTP requests are forwarded and retained with their request and response messages; double-click a history row to open the message inspector.
-- History is kept in memory only and bounded to 100 entries / 64 MiB. Captured messages can contain Authorization, Cookie or Set-Cookie values; clear history or close NetView to discard them.
-- HTTPS currently uses a raw CONNECT tunnel. NetView records the tunnel destination but does not decrypt or inspect HTTPS contents.
-- Chunked request bodies are not supported yet; request bodies are limited to 1 MiB and captured response bodies to 4 MiB.
-- Chromium is launched with a separate NetView profile and loopback proxy bypass disabled for that profile only.
-
-Use the proxy only for systems and traffic you own or are authorized to test. Do not configure other users' browsers or devices without their consent.
 
 ## Current scope and limitations
 

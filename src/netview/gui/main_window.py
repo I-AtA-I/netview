@@ -22,11 +22,6 @@ from PySide6.QtWidgets import (
 
 from netview.capture import LiveCaptureError, list_interfaces
 from netview.core.dissector import ETHERTYPE_NAMES
-from netview.capture.export import CaptureExportError, export_capture
-from netview.gui.analytics_dialog import AnalyticsDialog
-from netview.gui.request_lab import RequestLabDialog
-from netview.core.proxy import HTTPProxy
-from netview.gui.proxy_dialog import ProxyDialog
 from netview.core.tls import cipher_suite_name, tls_version_name
 from netview.core.pipeline import ProcessedPacket
 from netview.core.streams import tcp_stream_key_for_packet
@@ -143,7 +138,6 @@ class MainWindow(QMainWindow):
         self._current_path: Path | None = None
         self._selected_packet: ProcessedPacket | None = None
         self._stream_worker: TCPStreamWorker | None = None
-        self.proxy = HTTPProxy()
 
         self._build_actions()
         self._build_ui()
@@ -164,12 +158,6 @@ class MainWindow(QMainWindow):
         self.close_action.triggered.connect(self.close_capture)
         file_menu.addAction(self.close_action)
 
-        self.export_action = QAction("Export capture as…", self)
-        self.export_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
-        self.export_action.triggered.connect(self.export_capture_dialog)
-        self.export_action.setEnabled(False)
-        file_menu.addAction(self.export_action)
-
         capture_menu = self.menuBar().addMenu("&Capture")
         self.start_capture_action = QAction("Start live capture", self)
         self.start_capture_action.triggered.connect(self.start_live_capture)
@@ -180,21 +168,6 @@ class MainWindow(QMainWindow):
         capture_menu.addAction(self.stop_capture_action)
 
         analyze_menu = self.menuBar().addMenu("&Analyze")
-        self.analytics_action = QAction("Capture analytics…", self)
-        self.analytics_action.triggered.connect(self.show_analytics)
-        self.analytics_action.setEnabled(False)
-        analyze_menu.addAction(self.analytics_action)
-
-        self.proxy_action = QAction("HTTP Proxy…", self)
-        self.proxy_action.triggered.connect(self.open_proxy)
-        analyze_menu.addAction(self.proxy_action)
-
-        self.request_lab_action = QAction("HTTP Request Lab…", self)
-        self.request_lab_action.triggered.connect(self.open_request_lab)
-        self.request_lab_action.setEnabled(False)
-        analyze_menu.addAction(self.request_lab_action)
-        analyze_menu.addSeparator()
-
         self.follow_stream_action = QAction("Follow TCP Stream", self)
         self.follow_stream_action.setShortcut(QKeySequence("Ctrl+Shift+T"))
         self.follow_stream_action.triggered.connect(self.follow_tcp_stream)
@@ -333,54 +306,6 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.count_status)
         self.statusBar().showMessage("Ready — open a PCAP or PCAPNG file")
 
-
-    def export_capture_dialog(self) -> None:
-        if not self.model.total_count:
-            return
-
-        filename, selected_filter = QFileDialog.getSaveFileName(
-            self,
-            "Export capture",
-            str(Path.home() / "capture.pcap"),
-            "PCAP (*.pcap);;CSV (*.csv);;JSON (*.json)",
-        )
-        if not filename:
-            return
-
-        path = Path(filename).expanduser()
-        if not path.suffix:
-            extension = selected_filter.partition("*.")[2].partition(")")[0]
-            if extension:
-                path = path.with_suffix(f".{extension}")
-
-        try:
-            count = export_capture(path, self.model.iter_packets())
-        except (OSError, CaptureExportError) as exc:
-            QMessageBox.critical(self, "Export failed", str(exc))
-            return
-
-        self.statusBar().showMessage(f"Exported {count:,} packets to {path.name}")
-        QMessageBox.information(
-            self,
-            "Export complete",
-            f"Exported {count:,} packets to {path}",
-        )
-
-    def show_analytics(self) -> None:
-        packets = tuple(self.model.iter_packets())
-        if not packets:
-            return
-        AnalyticsDialog(packets, self).exec()
-
-    def open_proxy(self) -> None:
-        ProxyDialog(self.proxy, self).exec()
-
-    def open_request_lab(self) -> None:
-        packet = self._selected_packet
-        if packet is None or packet.dissection.http is None or not packet.dissection.http.is_request:
-            return
-        RequestLabDialog(packet, self).exec()
-
     def open_capture_dialog(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
@@ -470,16 +395,7 @@ class MainWindow(QMainWindow):
         self.start_capture_action.setEnabled(idle and has_interfaces)
         self.stop_capture_action.setEnabled(capturing)
         self.open_action.setEnabled(idle)
-        has_packets = self.model.total_count > 0
-        self.close_action.setEnabled(idle and has_packets)
-        self.export_action.setEnabled(idle and has_packets)
-        self.analytics_action.setEnabled(idle and has_packets)
-        has_http_request = (
-            self._selected_packet is not None
-            and self._selected_packet.dissection.http is not None
-            and self._selected_packet.dissection.http.is_request
-        )
-        self.request_lab_action.setEnabled(idle and has_http_request)
+        self.close_action.setEnabled(idle and self.model.total_count > 0)
         self.follow_stream_action.setEnabled(idle and has_selected_tcp)
         self.follow_stream_button.setEnabled(idle and has_selected_tcp)
 
@@ -983,7 +899,6 @@ class MainWindow(QMainWindow):
             self._live_worker.wait()
         if self._stream_worker is not None and self._stream_worker.isRunning():
             self._stream_worker.wait()
-        self.proxy.stop()
         event.accept()
 
     def _update_counts(self) -> None:
