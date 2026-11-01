@@ -1,6 +1,6 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
-from urllib.request import ProxyHandler, build_opener
+from socket import create_connection
 
 import pytest
 
@@ -36,9 +36,16 @@ def test_proxy_forwards_http_and_records_metadata(origin):
     proxy = HTTPProxy(port=0)
     host, port = proxy.start()
     try:
-        opener = build_opener(ProxyHandler({"http": f"http://{host}:{port}"}))
-        response = opener.open(f"http://127.0.0.1:{origin}/check", timeout=3)
-        assert response.read() == b"origin response"
+        with create_connection((host, port), timeout=3) as client:
+            client.sendall(
+                f"GET http://127.0.0.1:{origin}/check HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{origin}\r\nConnection: close\r\n\r\n".encode()
+            )
+            response = bytearray()
+            while chunk := client.recv(4096):
+                response.extend(chunk)
+        assert b"200 OK" in response
+        assert response.endswith(b"origin response")
         entries = proxy.history
         assert len(entries) == 1
         assert entries[0].method == "GET"
