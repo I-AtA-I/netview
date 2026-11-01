@@ -95,7 +95,8 @@ def analyze_capture(
             left = _endpoint(packet, True)
             right = _endpoint(packet, False)
             endpoint_a, endpoint_b = sorted((left, right))
-            key = (packet.protocol, endpoint_a, endpoint_b)
+            transport = "TCP" if packet.dissection.tcp is not None else "UDP"
+            key = (transport, endpoint_a, endpoint_b)
             conversation_data[key][0] += 1
             conversation_data[key][1] += packet.record.original_length
 
