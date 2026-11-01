@@ -132,8 +132,8 @@ Analytics currently summarizes the loaded capture in memory. Classic PCAP export
 NetView includes a local HTTP proxy for browser-based inspection. Open **Analyze → HTTP Proxy**, start the proxy, then launch the dedicated Chromium profile from the dialog or configure a browser to use `127.0.0.1:<port>`.
 
 - The proxy binds to loopback only; it is not exposed to the local network.
-- Plain HTTP requests are forwarded and summarized in an in-memory history (up to 500 entries).
-- Authorization, Cookie and Set-Cookie values are forwarded as required for normal browsing but are not stored in proxy history.
+- Plain HTTP requests are forwarded and retained with their request and response messages; double-click a history row to open the message inspector.
+- History is kept in memory only and bounded to 100 entries / 64 MiB. Captured messages can contain Authorization, Cookie or Set-Cookie values; clear history or close NetView to discard them.
 - HTTPS currently uses a raw CONNECT tunnel. NetView records the tunnel destination but does not decrypt or inspect HTTPS contents.
 - Chunked request bodies are not supported yet; request bodies are limited to 1 MiB and captured response bodies to 4 MiB.
 - Chromium is launched with a separate NetView profile and loopback proxy bypass disabled for that profile only.
