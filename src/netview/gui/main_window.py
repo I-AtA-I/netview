@@ -24,6 +24,7 @@ from netview.capture import LiveCaptureError, list_interfaces
 from netview.core.dissector import ETHERTYPE_NAMES
 from netview.capture.export import CaptureExportError, export_capture
 from netview.gui.analytics_dialog import AnalyticsDialog
+from netview.gui.request_lab import RequestLabDialog
 from netview.core.tls import cipher_suite_name, tls_version_name
 from netview.core.pipeline import ProcessedPacket
 from netview.core.streams import tcp_stream_key_for_packet
@@ -180,6 +181,11 @@ class MainWindow(QMainWindow):
         self.analytics_action.triggered.connect(self.show_analytics)
         self.analytics_action.setEnabled(False)
         analyze_menu.addAction(self.analytics_action)
+
+        self.request_lab_action = QAction("HTTP Request Lab…", self)
+        self.request_lab_action.triggered.connect(self.open_request_lab)
+        self.request_lab_action.setEnabled(False)
+        analyze_menu.addAction(self.request_lab_action)
         analyze_menu.addSeparator()
 
         self.follow_stream_action = QAction("Follow TCP Stream", self)
@@ -359,6 +365,12 @@ class MainWindow(QMainWindow):
             return
         AnalyticsDialog(packets, self).exec()
 
+    def open_request_lab(self) -> None:
+        packet = self._selected_packet
+        if packet is None or packet.dissection.http is None or not packet.dissection.http.is_request:
+            return
+        RequestLabDialog(packet, self).exec()
+
     def open_capture_dialog(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
@@ -452,6 +464,12 @@ class MainWindow(QMainWindow):
         self.close_action.setEnabled(idle and has_packets)
         self.export_action.setEnabled(idle and has_packets)
         self.analytics_action.setEnabled(idle and has_packets)
+        has_http_request = (
+            self._selected_packet is not None
+            and self._selected_packet.dissection.http is not None
+            and self._selected_packet.dissection.http.is_request
+        )
+        self.request_lab_action.setEnabled(idle and has_http_request)
         self.follow_stream_action.setEnabled(idle and has_selected_tcp)
         self.follow_stream_button.setEnabled(idle and has_selected_tcp)
 

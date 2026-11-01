@@ -19,6 +19,7 @@ NetView is a desktop network protocol analyzer built with Python and PySide6. It
 - Keep promiscuous mode disabled by default.
 - View capture analytics including protocol distribution, top talkers, conversations and packet timeline.
 - Export captures to classic PCAP, CSV or JSON.
+- Open captured HTTP requests in a local-only Request Lab, edit the request and inspect the response.
 - Drag and drop capture files into the application.
 
 ## Requirements
@@ -121,6 +122,8 @@ not tcp
 ```
 
 Supported fields and operators are implemented in `src/netview/filters/engine.py`. The filter engine supports common ARP, IPv4, IPv6, TCP, UDP, ICMP, DNS, HTTP and TLS predicates. String values can be quoted when they contain spaces or filter operators, for example `http.request.uri == "/search?q=netview"`. IPv6 extension headers supported by the dissection engine are Hop-by-Hop Options, Routing, Fragment, AH, Destination Options, Mobility, HIP and Shim6. IPv6 jumbograms are not implemented.
+
+HTTP Request Lab strips captured Cookie and Authorization headers and only connects to localhost/loopback addresses. Requests are limited to 64 KiB and responses to 256 KiB; it is intended for local service testing, not remote request replay.
 
 Analytics currently summarizes the loaded capture in memory. Classic PCAP export requires all packets to use the same link type; use CSV or JSON for mixed-linktype captures.
 
