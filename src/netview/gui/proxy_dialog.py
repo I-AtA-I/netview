@@ -76,6 +76,11 @@ class ProxyDialog(QDialog):
         self.refresh_timer.setInterval(500)
         self.refresh_timer.timeout.connect(self.refresh_history)
         self.refresh_timer.start()
+        if self.proxy.running:
+            host, port = self.proxy.address
+            self.state_label.setText(
+                f"Running on http://{host}:{port} · configure Chromium to use this proxy"
+            )
         self._update_state()
 
     def start_proxy(self) -> None:
