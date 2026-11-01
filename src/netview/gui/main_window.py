@@ -25,6 +25,8 @@ from netview.core.dissector import ETHERTYPE_NAMES
 from netview.capture.export import CaptureExportError, export_capture
 from netview.gui.analytics_dialog import AnalyticsDialog
 from netview.gui.request_lab import RequestLabDialog
+from netview.core.proxy import HTTPProxy
+from netview.gui.proxy_dialog import ProxyDialog
 from netview.core.tls import cipher_suite_name, tls_version_name
 from netview.core.pipeline import ProcessedPacket
 from netview.core.streams import tcp_stream_key_for_packet
@@ -141,6 +143,7 @@ class MainWindow(QMainWindow):
         self._current_path: Path | None = None
         self._selected_packet: ProcessedPacket | None = None
         self._stream_worker: TCPStreamWorker | None = None
+        self.proxy = HTTPProxy()
 
         self._build_actions()
         self._build_ui()
@@ -181,6 +184,10 @@ class MainWindow(QMainWindow):
         self.analytics_action.triggered.connect(self.show_analytics)
         self.analytics_action.setEnabled(False)
         analyze_menu.addAction(self.analytics_action)
+
+        self.proxy_action = QAction("HTTP Proxy…", self)
+        self.proxy_action.triggered.connect(self.open_proxy)
+        analyze_menu.addAction(self.proxy_action)
 
         self.request_lab_action = QAction("HTTP Request Lab…", self)
         self.request_lab_action.triggered.connect(self.open_request_lab)
@@ -364,6 +371,9 @@ class MainWindow(QMainWindow):
         if not packets:
             return
         AnalyticsDialog(packets, self).exec()
+
+    def open_proxy(self) -> None:
+        ProxyDialog(self.proxy, self).exec()
 
     def open_request_lab(self) -> None:
         packet = self._selected_packet
@@ -973,6 +983,7 @@ class MainWindow(QMainWindow):
             self._live_worker.wait()
         if self._stream_worker is not None and self._stream_worker.isRunning():
             self._stream_worker.wait()
+        self.proxy.stop()
         event.accept()
 
     def _update_counts(self) -> None:
