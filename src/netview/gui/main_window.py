@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
 )
 
 from netview.capture import LiveCaptureError, list_interfaces
+from netview.core.dissector import ETHERTYPE_NAMES
+from netview.core.tls import cipher_suite_name, tls_version_name
 from netview.core.pipeline import ProcessedPacket
 from netview.core.streams import tcp_stream_key_for_packet
 from netview.filters import FilterSyntaxError
@@ -230,7 +232,7 @@ class MainWindow(QMainWindow):
         filter_label.setStyleSheet("color: #bdb2ca; font-weight: 600;")
         self.filter_input = QLineEdit()
         self.filter_input.setPlaceholderText(
-            "e.g. tcp.port == 443 or udp.port == 53"
+            "e.g. tcp.port == 443 or dns.qry.name == example.com"
         )
         self.filter_input.returnPressed.connect(self.apply_filter)
         self.apply_button = QPushButton("Apply")
@@ -250,7 +252,7 @@ class MainWindow(QMainWindow):
         filter_row.addWidget(self.follow_stream_button)
         root.addLayout(filter_row)
 
-        self.filter_status = QLabel("Filters: tcp, udp, ip.src, ip.dst, ports, flags, frame length")
+        self.filter_status = QLabel("Filters: dns, http, tls, arp, ipv6, tcp, udp, icmp, app metadata, addresses, ports")
         self.filter_status.setStyleSheet("color: #847a90; font-size: 9pt;")
         root.addWidget(self.filter_status)
 
@@ -533,7 +535,7 @@ class MainWindow(QMainWindow):
         self.file_label.setText("No capture loaded")
         self.filter_input.clear()
         self.filter_status.setText(
-            "Filters: tcp, udp, ip.src, ip.dst, ports, flags, frame length"
+            "Filters: arp, ipv6, tcp, udp, icmp, IP addresses, ports, flags, frame length"
         )
         self.filter_status.setStyleSheet("color: #847a90; font-size: 9pt;")
         self._clear_packet_details()
@@ -579,6 +581,7 @@ class MainWindow(QMainWindow):
                 ("Destination", eth.destination_mac),
                 ("Source", eth.source_mac),
                 ("Type / Length", f"0x{eth.type_or_length:04x}"),
+                ("Decoded type", ETHERTYPE_NAMES.get(eth.type_or_length, "IEEE 802.3 length field" if eth.ether_type is None else "Unknown EtherType")),
                 ("Payload offset", f"{eth.payload_offset} bytes"),
             ])
             for index, tag in enumerate(eth.vlan_tags, start=1):
@@ -587,6 +590,20 @@ class MainWindow(QMainWindow):
                 self._add_child(vlan, "VLAN ID", tag.vlan_id)
                 self._add_child(vlan, "Priority", tag.priority)
                 self._add_child(vlan, "Drop eligible", tag.drop_eligible)
+
+        if result.arp is not None:
+            arp = result.arp
+            self._add_section("Address Resolution Protocol", [
+                ("Hardware type", f"{arp.hardware_type_name} ({arp.hardware_type})"),
+                ("Protocol type", f"{arp.protocol_type_name} (0x{arp.protocol_type:04x})"),
+                ("Hardware size", arp.hardware_length),
+                ("Protocol size", arp.protocol_length),
+                ("Opcode", f"{arp.operation} ({arp.opcode})"),
+                ("Sender MAC address", arp.sender_hardware_address),
+                ("Sender protocol address", arp.sender_protocol_address),
+                ("Target MAC address", arp.target_hardware_address),
+                ("Target protocol address", arp.target_protocol_address),
+            ])
 
         if result.ipv4 is not None:
             ip = result.ipv4
@@ -607,6 +624,46 @@ class MainWindow(QMainWindow):
                 ("Header checksum", f"0x{ip.header_checksum:04x}"),
                 ("Truncated", ip.is_truncated),
             ])
+
+        if result.ipv6 is not None:
+            ip = result.ipv6
+            item = self._add_section("Internet Protocol Version 6", [
+                ("Source address", ip.source_ip),
+                ("Destination address", ip.destination_ip),
+                ("Traffic class", ip.traffic_class),
+                ("Flow label", f"0x{ip.flow_label:05x}"),
+                ("Payload length", f"{ip.payload_length} bytes"),
+                ("Initial next header", ip.next_header),
+                ("Upper-layer protocol", ip.upper_layer_protocol),
+                ("Hop limit", ip.hop_limit),
+                ("Fragment offset", f"{ip.fragment_offset} bytes"),
+                ("More fragments", ip.more_fragments),
+                ("Fragment identification", ip.fragment_identification if ip.fragment_identification is not None else "N/A"),
+                ("Truncated", ip.is_truncated),
+            ])
+            for index, extension in enumerate(ip.extension_headers, start=1):
+                ext_item = QTreeWidgetItem(item, [f"Extension {index}: {extension.name}", ""])
+                self._add_child(ext_item, "Next header", extension.next_header)
+                self._add_child(ext_item, "Offset", f"{extension.offset} bytes")
+                self._add_child(ext_item, "Length", f"{extension.length} bytes")
+                if extension.fragment_offset is not None:
+                    self._add_child(ext_item, "Fragment offset", f"{extension.fragment_offset} bytes")
+                    self._add_child(ext_item, "More fragments", extension.more_fragments)
+                    self._add_child(ext_item, "Identification", extension.fragment_identification)
+
+        if result.icmp is not None:
+            icmp = result.icmp
+            self._add_section(
+                "Internet Control Message Protocol" if icmp.version == 4 else "Internet Control Message Protocol v6",
+                [
+                    ("Type", f"{icmp.type_name} ({icmp.type})"),
+                    ("Code", icmp.code),
+                    ("Checksum", f"0x{icmp.checksum:04x}"),
+                    ("Identifier", icmp.identifier if icmp.identifier is not None else "N/A"),
+                    ("Sequence number", icmp.sequence_number if icmp.sequence_number is not None else "N/A"),
+                    ("Header length", f"{icmp.header_length} bytes"),
+                ],
+            )
 
         if result.tcp is not None:
             tcp = result.tcp
@@ -635,6 +692,93 @@ class MainWindow(QMainWindow):
                 ("Captured length", f"{udp.captured_length} bytes"),
                 ("Truncated", udp.is_truncated),
             ])
+
+        if result.dns is not None:
+            dns = result.dns
+            dns_item = self._add_section("Domain Name System", [
+                ("Transaction ID", f"0x{dns.transaction_id:04x}"),
+                ("Message type", "Response" if dns.is_response else "Query"),
+                ("Opcode", dns.opcode),
+                ("Authoritative", dns.authoritative),
+                ("Truncated", dns.truncated),
+                ("Recursion desired", dns.recursion_desired),
+                ("Recursion available", dns.recursion_available),
+                ("Response code", f"{dns.rcode_name} ({dns.rcode})"),
+                ("Questions", len(dns.questions)),
+                ("Answers", len(dns.answers)),
+                ("Authorities", len(dns.authorities)),
+                ("Additional records", len(dns.additionals)),
+                ("TCP length framing", dns.tcp_framed),
+            ])
+            for index, question in enumerate(dns.questions, start=1):
+                question_item = QTreeWidgetItem(dns_item, [f"Question {index}", ""])
+                self._add_child(question_item, "Name", question.name)
+                self._add_child(question_item, "Type", f"{question.type_name} ({question.qtype})")
+                self._add_child(question_item, "Class", question.qclass)
+            for section_name, records in (
+                ("Answer", dns.answers),
+                ("Authority", dns.authorities),
+                ("Additional", dns.additionals),
+            ):
+                for index, record in enumerate(records, start=1):
+                    record_item = QTreeWidgetItem(dns_item, [f"{section_name} {index}: {record.name}", ""])
+                    self._add_child(record_item, "Type", f"{record.type_name} ({record.record_type})")
+                    self._add_child(record_item, "Class", record.record_class)
+                    self._add_child(record_item, "TTL", f"{record.ttl} seconds")
+                    self._add_child(record_item, "Data length", f"{record.data_length} bytes")
+                    self._add_child(record_item, "Data", record.data)
+
+        if result.http is not None:
+            http = result.http
+            fields = [
+                ("Message type", "Request" if http.is_request else "Response"),
+                ("Version", http.version),
+                ("Method", http.method or "N/A"),
+                ("Request target", http.target or "N/A"),
+                ("Status code", http.status_code if http.status_code is not None else "N/A"),
+                ("Reason", http.reason or "N/A"),
+                ("Host", http.host or "N/A"),
+                ("Content-Type", http.content_type or "N/A"),
+                ("Content-Length", http.content_length if http.content_length is not None else "N/A"),
+                ("Server", http.server or "N/A"),
+                ("Connection", http.connection or "N/A"),
+                ("Transfer-Encoding", http.transfer_encoding or "N/A"),
+                ("Parsed headers", http.header_count),
+                ("Header block complete", http.headers_complete),
+            ]
+            self._add_section("Hypertext Transfer Protocol", fields)
+
+        if result.tls is not None:
+            tls = result.tls
+            fields = [
+                ("Record content type", f"{tls.content_type_name} ({tls.content_type})"),
+                ("Record legacy version", f"{tls.version_name} (0x{tls.legacy_version:04x})"),
+                ("Record length", f"{tls.record_length} bytes"),
+                ("Captured record payload", f"{tls.captured_length} bytes"),
+                ("Record truncated", tls.is_truncated),
+                ("Handshake type", tls.handshake_name or "N/A"),
+                ("Handshake length", tls.handshake_length if tls.handshake_length is not None else "N/A"),
+                ("Handshake truncated", tls.handshake_is_truncated),
+            ]
+            tls_item = self._add_section("Transport Layer Security", fields)
+            if tls.client_hello is not None:
+                hello = tls.client_hello
+                hello_item = QTreeWidgetItem(tls_item, ["Client Hello", ""])
+                self._add_child(hello_item, "Legacy version", tls_version_name(hello.legacy_version))
+                self._add_child(hello_item, "Server Name (SNI)", hello.server_name or "N/A")
+                self._add_child(hello_item, "ALPN", ", ".join(hello.alpn_protocols) or "N/A")
+                self._add_child(hello_item, "Supported versions", ", ".join(tls_version_name(v) for v in hello.supported_versions) or "N/A")
+                self._add_child(hello_item, "Cipher suites", len(hello.cipher_suites))
+                for cipher in hello.cipher_suites:
+                    self._add_child(hello_item, f"Cipher 0x{cipher:04x}", cipher_suite_name(cipher))
+            if tls.server_hello is not None:
+                hello = tls.server_hello
+                hello_item = QTreeWidgetItem(tls_item, ["Server Hello", ""])
+                negotiated = hello.negotiated_version or hello.legacy_version
+                self._add_child(hello_item, "Negotiated version", tls_version_name(negotiated))
+                self._add_child(hello_item, "Cipher suite", cipher_suite_name(hello.cipher_suite))
+                self._add_child(hello_item, "ALPN", hello.alpn_protocol or "N/A")
+                self._add_child(hello_item, "Compression method", hello.compression_method)
 
         if result.errors:
             self._add_section("Dissection warnings", [

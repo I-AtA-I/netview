@@ -5,7 +5,11 @@ NetView is a desktop network protocol analyzer built with Python and PySide6. It
 ## Current features
 
 - Read classic PCAP and PCAPNG capture files.
-- Decode Ethernet II, VLAN, IPv4, TCP and UDP headers.
+- Decode Ethernet II, VLAN, ARP, IPv4, IPv6, TCP, UDP, ICMP and ICMPv6 headers.
+- Dissect DNS over UDP/TCP, including questions and common A, AAAA, name, MX and TXT records.
+- Dissect HTTP/1.x request/response start lines and selected non-credential headers.
+- Dissect TLS records plus ClientHello/ServerHello metadata such as SNI, ALPN, supported versions and cipher suites.
+- Identify common non-decoded Ethernet protocols such as LLDP, EAPOL, MPLS and PPPoE by EtherType.
 - Display packet metadata, protocol details and a raw hexadecimal/ASCII view.
 - Filter packets with the built-in display-filter language.
 - Load capture files in a background thread so the interface stays responsive during import.
@@ -82,8 +86,27 @@ NetView invokes `dumpcap` for one manually selected interface and passes packets
 ## Display filter examples
 
 ```text
+arp
+ipv6
+icmp
+icmpv6
+dns
+mdns
+llmnr
+http
+tls
+dns.qry.name == example.com
+dns.qry.type == 28
+http.host == example.com
+http.request.method == GET
+http.response.code == 200
+tls.sni == example.com
+tls.handshake.type == 1
 tcp
 udp
+arp.opcode == 1
+arp.src.proto_ipv4 == 192.0.2.10
+ipv6.src == 2001:db8::1
 ip.src == 192.0.2.10
 tcp.port == 443
 udp.port == 53
@@ -95,11 +118,11 @@ not tcp
 (tcp or udp) and ip
 ```
 
-Supported fields and operators are implemented in `src/netview/filters/engine.py`. The initial filter engine supports IPv4 fields; IPv6 decoding and filtering are not implemented yet.
+Supported fields and operators are implemented in `src/netview/filters/engine.py`. The filter engine supports common ARP, IPv4, IPv6, TCP, UDP, ICMP, DNS, HTTP and TLS predicates. String values can be quoted when they contain spaces or filter operators, for example `http.request.uri == "/search?q=netview"`. IPv6 extension headers supported by the dissection engine are Hop-by-Hop Options, Routing, Fragment, AH, Destination Options, Mobility, HIP and Shim6. IPv6 jumbograms are not implemented.
 
 ## Current scope and limitations
 
-NetView is an early portfolio project, not a replacement for Wireshark. The current dissection engine supports Ethernet II/VLAN, IPv4, TCP and UDP. IPv6, ICMP decoding, checksum validation, IP fragment reassembly, TCP connection-reuse detection and advanced application-protocol decoding remain future work. TCP stream reconstruction currently groups IPv4 conversations by the endpoint/port tuple; reused tuples within one capture can therefore be combined. IPv4-fragmented TCP packets are excluded until IP fragment reassembly is implemented. Sequence gaps are reported only between observed payload segments, because a missing tail cannot be inferred reliably.
+NetView is an early portfolio project, not a replacement for Wireshark. Application dissection is currently packet-based: a DNS message, HTTP/1.x start line and header block, or TLS record/hello must be sufficiently present in the captured packet. Application messages split across multiple TCP segments are not yet reassembled for application decoding, even though a separate Follow TCP Stream view is available. DNS-over-TLS, DNS-over-HTTPS, HTTP/2 and HTTP/3 are not decoded. HTTP parsing deliberately omits credential-bearing Cookie and Authorization headers and does not parse message bodies. TLS support is metadata-only: NetView does not decrypt TLS application data. TLS 1.3 encrypts most handshake messages after ServerHello, and Encrypted ClientHello (ECH) can hide the server name; in those cases SNI may not be available. Checksum validation, IP fragment reassembly and TCP connection-reuse detection remain future work. TCP stream reconstruction currently groups IPv4 conversations by the endpoint/port tuple; reused tuples within one capture can therefore be combined. IPv4-fragmented TCP packets are excluded until IP fragment reassembly is implemented. Sequence gaps are reported only between observed payload segments, because a missing tail cannot be inferred reliably.
 
 Live capture uses `dumpcap` on one interface selected by the user. Promiscuous mode is explicitly disabled. On Linux, `dumpcap` must have the operating-system capture permissions configured; do not run the GUI, IDE, or Python interpreter as root just to bypass a permission error.
 
@@ -123,3 +146,23 @@ tests/             # parser, pipeline, capture and filter tests
 ## Authorization
 
 Only inspect packet captures that you own or are authorized to analyze. Use live capture only on interfaces and networks you are permitted to monitor.
+
+## Troubleshooting
+
+### `ModuleNotFoundError: No module named 'tests'`
+
+The test suite is a local Python package. Keep `tests/__init__.py` in place when running `pytest` from the repository root:
+
+```bash
+pytest -v
+```
+
+### Qt reports `Failed to create wl_display`
+
+This means Qt selected its Wayland platform plugin but could not connect to a Wayland display. In an X11 desktop session (for example XFCE), try launching with the XCB platform plugin:
+
+```bash
+QT_QPA_PLATFORM=xcb python -m netview
+```
+
+Do not set this globally unless you specifically need it; on a working Wayland session, the default platform selection should be allowed.

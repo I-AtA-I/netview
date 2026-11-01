@@ -98,7 +98,7 @@ def test_process_udp_packet():
 
 
 def test_process_unknown_ethertype():
-    frame = DST + SRC + b"\x86\xdd" + b"\x00" * 10
+    frame = DST + SRC + b"\x88\xb5" + b"\x00" * 10
 
     packet = PacketRecord(
         number=1,
@@ -111,7 +111,7 @@ def test_process_unknown_ethertype():
 
     processed = process_packet(packet)
 
-    assert processed.protocol == "EtherType 0x86dd"
+    assert processed.protocol == "EtherType 0x88b5"
     assert processed.source == "11:22:33:44:55:66"
     assert processed.destination == "aa:bb:cc:dd:ee:ff"
     assert processed.source_port is None
