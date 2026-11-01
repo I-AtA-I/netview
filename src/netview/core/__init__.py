@@ -22,6 +22,17 @@ from .pipeline import (
 )
 from .tcp import TCPHeader, TCPParseError, parse_tcp_segment
 from .udp import UDPHeader, UDPParseError, parse_udp_datagram
+from .streams import (
+    ReassembledChunk,
+    ReassembledDirection,
+    SequenceGap,
+    StreamEndpoint,
+    TCPStream,
+    TCPStreamKey,
+    build_tcp_stream,
+    build_tcp_streams,
+    tcp_stream_key_for_packet,
+)
 
 __all__ = [
     "PacketRecord",
@@ -44,4 +55,14 @@ __all__ = [
     "ProcessedPacket",
     "process_packet",
     "iter_processed_packets",
+    "StreamEndpoint",
+    "TCPStreamKey",
+    "ReassembledChunk",
+    "SequenceGap",
+    "ReassembledDirection",
+    "TCPStream",
+    "build_tcp_stream",
+    "build_tcp_streams",
+    "tcp_stream_key_for_packet",
 ]
+

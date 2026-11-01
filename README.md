@@ -11,6 +11,7 @@ NetView is a desktop network protocol analyzer built with Python and PySide6. It
 - Load capture files in a background thread so the interface stays responsive during import.
 - Capture packets live from one manually selected network interface.
 - Stop live capture without closing the application; captured packets remain available for filtering and inspection.
+- Reassemble IPv4/TCP conversations in both directions, including out-of-order segments, sequence wraparound, overlaps/retransmissions and explicit sequence gaps.
 - Keep promiscuous mode disabled by default.
 - Drag and drop capture files into the application.
 
@@ -98,7 +99,7 @@ Supported fields and operators are implemented in `src/netview/filters/engine.py
 
 ## Current scope and limitations
 
-NetView is an early portfolio project, not a replacement for Wireshark. The current dissection engine supports Ethernet II/VLAN, IPv4, TCP and UDP. IPv6, ICMP decoding, checksum validation, fragment reassembly, TCP stream reconstruction and advanced protocol decoding remain future work.
+NetView is an early portfolio project, not a replacement for Wireshark. The current dissection engine supports Ethernet II/VLAN, IPv4, TCP and UDP. IPv6, ICMP decoding, checksum validation, IP fragment reassembly, TCP connection-reuse detection and advanced application-protocol decoding remain future work. TCP stream reconstruction currently groups IPv4 conversations by the endpoint/port tuple; reused tuples within one capture can therefore be combined. IPv4-fragmented TCP packets are excluded until IP fragment reassembly is implemented. Sequence gaps are reported only between observed payload segments, because a missing tail cannot be inferred reliably.
 
 Live capture uses `dumpcap` on one interface selected by the user. Promiscuous mode is explicitly disabled. On Linux, `dumpcap` must have the operating-system capture permissions configured; do not run the GUI, IDE, or Python interpreter as root just to bypass a permission error.
 
@@ -112,9 +113,9 @@ The first GUI version loads packets into memory after reading them in batches. I
 src/netview/
 ├── app.py
 ├── capture/       # PCAP/PCAPNG reader and live capture helpers
-├── core/          # packet models, protocol parsers and dissection pipeline
+├── core/          # packet models, protocol parsers, dissection pipeline and TCP reassembly
 ├── filters/       # display-filter parser and evaluator
-└── gui/           # PySide6 window, packet table model and capture workers
+└── gui/           # PySide6 window, packet table, capture workers and stream viewer
 
 tests/             # parser, pipeline, capture and filter tests
 ```

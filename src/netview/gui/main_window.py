@@ -22,10 +22,13 @@ from PySide6.QtWidgets import (
 
 from netview.capture import LiveCaptureError, list_interfaces
 from netview.core.pipeline import ProcessedPacket
+from netview.core.streams import tcp_stream_key_for_packet
 from netview.filters import FilterSyntaxError
 from netview.gui.table_model import PacketTableModel
 
 from .live_worker import LiveCaptureWorker
+from .stream_dialog import TCPStreamDialog
+from .stream_worker import TCPStreamWorker
 from .worker import CaptureLoadWorker
 
 
@@ -132,6 +135,7 @@ class MainWindow(QMainWindow):
         self._live_capture_error = False
         self._current_path: Path | None = None
         self._selected_packet: ProcessedPacket | None = None
+        self._stream_worker: TCPStreamWorker | None = None
 
         self._build_actions()
         self._build_ui()
@@ -160,6 +164,13 @@ class MainWindow(QMainWindow):
         self.stop_capture_action = QAction("Stop live capture", self)
         self.stop_capture_action.triggered.connect(self.stop_live_capture)
         capture_menu.addAction(self.stop_capture_action)
+
+        analyze_menu = self.menuBar().addMenu("&Analyze")
+        self.follow_stream_action = QAction("Follow TCP Stream", self)
+        self.follow_stream_action.setShortcut(QKeySequence("Ctrl+Shift+T"))
+        self.follow_stream_action.triggered.connect(self.follow_tcp_stream)
+        self.follow_stream_action.setEnabled(False)
+        analyze_menu.addAction(self.follow_stream_action)
 
         file_menu.addSeparator()
         exit_action = QAction("Exit", self)
@@ -226,10 +237,17 @@ class MainWindow(QMainWindow):
         self.apply_button.clicked.connect(self.apply_filter)
         self.clear_filter_button = QPushButton("Clear")
         self.clear_filter_button.clicked.connect(self.clear_filter)
+        self.follow_stream_button = QPushButton("Follow TCP Stream")
+        self.follow_stream_button.setToolTip(
+            "Reassemble both directions of the selected IPv4/TCP conversation (Ctrl+Shift+T)."
+        )
+        self.follow_stream_button.clicked.connect(self.follow_tcp_stream)
+        self.follow_stream_button.setEnabled(False)
         filter_row.addWidget(filter_label)
         filter_row.addWidget(self.filter_input, 1)
         filter_row.addWidget(self.apply_button)
         filter_row.addWidget(self.clear_filter_button)
+        filter_row.addWidget(self.follow_stream_button)
         root.addLayout(filter_row)
 
         self.filter_status = QLabel("Filters: tcp, udp, ip.src, ip.dst, ports, flags, frame length")
@@ -359,8 +377,14 @@ class MainWindow(QMainWindow):
     def _update_capture_controls(self) -> None:
         loading = self._worker is not None
         capturing = self._live_worker is not None
-        idle = not loading and not capturing
+        analyzing = self._stream_worker is not None
+        idle = not loading and not capturing and not analyzing
         has_interfaces = self.interface_combo.count() > 0
+        has_selected_tcp = (
+            self._selected_packet is not None
+            and self._selected_packet.dissection.ipv4 is not None
+            and self._selected_packet.dissection.tcp is not None
+        )
 
         self.interface_combo.setEnabled(idle)
         self.refresh_interfaces_button.setEnabled(idle)
@@ -370,6 +394,8 @@ class MainWindow(QMainWindow):
         self.stop_capture_action.setEnabled(capturing)
         self.open_action.setEnabled(idle)
         self.close_action.setEnabled(idle and self.model.total_count > 0)
+        self.follow_stream_action.setEnabled(idle and has_selected_tcp)
+        self.follow_stream_button.setEnabled(idle and has_selected_tcp)
 
     def refresh_interfaces(self) -> None:
         current = self.interface_combo.currentText()
@@ -530,6 +556,7 @@ class MainWindow(QMainWindow):
         self._selected_packet = None
         self.details_tree.clear()
         self.hex_view.clear()
+        self._update_capture_controls()
 
     def _show_packet_details(self, packet: ProcessedPacket) -> None:
         self._selected_packet = packet
@@ -623,6 +650,62 @@ class MainWindow(QMainWindow):
 
         self.details_tree.expandToDepth(1)
         self.hex_view.setPlainText(self._format_hex(record.data))
+        self._update_capture_controls()
+
+    def follow_tcp_stream(self) -> None:
+        if self._stream_worker is not None:
+            return
+
+        packet = self._selected_packet
+        if packet is None:
+            return
+
+        key_result = tcp_stream_key_for_packet(packet)
+        if key_result is None:
+            QMessageBox.information(
+                self,
+                "TCP stream unavailable",
+                "Select an IPv4/TCP packet first.",
+            )
+            return
+
+        stream_key, _direction = key_result
+        packets = tuple(self.model.iter_packets())
+        if not packets:
+            return
+
+        self.statusBar().showMessage("Reassembling TCP stream…")
+        self.filter_status.setText(
+            "Reassembling the selected TCP conversation from all captured packets…"
+        )
+        self._stream_worker = TCPStreamWorker(packets, stream_key, self)
+        self._stream_worker.stream_ready.connect(self._on_stream_ready)
+        self._stream_worker.analysis_failed.connect(self._on_stream_failed)
+        self._stream_worker.finished.connect(self._on_stream_worker_finished)
+        self._stream_worker.finished.connect(self._stream_worker.deleteLater)
+        self._update_capture_controls()
+        self._stream_worker.start()
+
+    def _on_stream_ready(self, stream) -> None:
+        if stream is None:
+            QMessageBox.information(
+                self,
+                "TCP stream not found",
+                "No packets for the selected TCP conversation were found in the capture.",
+            )
+            return
+
+        dialog = TCPStreamDialog(stream, self)
+        dialog.exec()
+
+    def _on_stream_failed(self, message: str) -> None:
+        QMessageBox.critical(self, "TCP stream reconstruction failed", message)
+        self.statusBar().showMessage("TCP stream reconstruction failed")
+
+    def _on_stream_worker_finished(self) -> None:
+        self._stream_worker = None
+        self._update_capture_controls()
+        self.statusBar().showMessage("TCP stream analysis finished")
 
     def _add_section(self, title: str, fields: list[tuple[str, object]]) -> QTreeWidgetItem:
         section = QTreeWidgetItem(self.details_tree, [title, ""])
@@ -670,6 +753,8 @@ class MainWindow(QMainWindow):
         if self._live_worker is not None and self._live_worker.isRunning():
             self._live_worker.stop()
             self._live_worker.wait()
+        if self._stream_worker is not None and self._stream_worker.isRunning():
+            self._stream_worker.wait()
         event.accept()
 
     def _update_counts(self) -> None:

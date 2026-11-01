@@ -131,6 +131,10 @@ class PacketTableModel(QAbstractTableModel):
             return self._visible[row]
         return None
 
+    def iter_packets(self):
+        """Iterate over all captured packets, regardless of display filter."""
+        return iter(self._packets)
+
     @property
     def total_count(self) -> int:
         return len(self._packets)
