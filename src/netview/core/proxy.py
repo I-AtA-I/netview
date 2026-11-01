@@ -112,7 +112,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         response_message = b""
         try:
             body = self.rfile.read(length) if length else b""
-            request_message = self.raw_requestline + self.headers.as_bytes() + b"\\r\\n" + body
+            request_message = self.raw_requestline + self.headers.as_bytes() + b"\r\n" + body
             connection = HTTPConnection(target.hostname, port, timeout=8)
             try:
                 connection.request(self.command, path, body=body or None, headers=headers)
@@ -124,14 +124,14 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
                 response_message = (
                     f"HTTP/{response.version // 10}.{response.version % 10} "
-                    f"{response.status} {response.reason or ''}\\r\\n"
+                    f"{response.status} {response.reason or ''}\r\n"
                 ).encode("latin-1", "replace")
                 for name, value in response_headers:
                     if name.lower() not in _HOP_HEADERS and name.lower() != "content-length":
-                        response_message += f"{name}: {value}\\r\\n".encode("latin-1", "replace")
+                        response_message += f"{name}: {value}\r\n".encode("latin-1", "replace")
                 response_message += (
-                    f"Content-Length: {len(response_body)}\\r\\n"
-                    "Connection: close\\r\\n\\r\\n"
+                    f"Content-Length: {len(response_body)}\r\n"
+                    "Connection: close\r\n\r\n"
                 ).encode("ascii") + response_body
 
                 self.send_response(response.status, response.reason)
@@ -161,7 +161,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 connection.close()
         except (OSError, HTTPException, ValueError) as exc:
             if not request_message:
-                request_message = self.raw_requestline + self.headers.as_bytes() + b"\\r\\n" + body
+                request_message = self.raw_requestline + self.headers.as_bytes() + b"\r\n" + body
             try:
                 self._respond_error(502, "Upstream request failed")
             except OSError:

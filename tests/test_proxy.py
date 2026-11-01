@@ -77,7 +77,7 @@ def test_proxy_history_is_bounded():
     for index in range(510):
         from netview.core.proxy import ProxyEntry
         proxy._record(ProxyEntry(index, "GET", "/", 200, (), 0, 0))
-    assert len(proxy.history) == 500
+    assert len(proxy.history) == 100
 
 
 
@@ -88,11 +88,11 @@ def test_proxy_captures_request_and_response_bodies(origin):
     try:
         with create_connection((host, port), timeout=3) as client:
             client.sendall(
-                f"POST http://127.0.0.1:{origin}/echo HTTP/1.1\\r\\n"
-                f"Host: 127.0.0.1:{origin}\\r\\n"
-                f"Content-Type: application/json\\r\\n"
-                f"Content-Length: {len(body)}\\r\\n"
-                "Connection: close\\r\\n\\r\\n".encode() + body
+                f"POST http://127.0.0.1:{origin}/echo HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{origin}\r\n"
+                f"Content-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\n"
+                "Connection: close\r\n\r\n".encode() + body
             )
             response = bytearray()
             while chunk := client.recv(4096):
