@@ -1,5 +1,6 @@
 import csv
 import json
+import struct
 from math import floor
 from pathlib import Path
 from collections.abc import Iterable
@@ -63,8 +64,6 @@ def _export_json(path: Path, packets: list[ProcessedPacket]) -> None:
 
 
 def _export_pcap(path: Path, packets: list[ProcessedPacket]) -> None:
-    from scapy.utils import RawPcapWriter
-
     link_types = {packet.record.link_type for packet in packets}
     if len(link_types) != 1:
         raise CaptureExportError(
@@ -72,10 +71,23 @@ def _export_pcap(path: Path, packets: list[ProcessedPacket]) -> None:
             "Export this mixed-linktype capture as CSV or JSON."
         )
 
-    writer = RawPcapWriter(
-        str(path), linktype=next(iter(link_types)), nano=True, sync=True
-    )
-    try:
+    link_type = next(iter(link_types))
+    max_length = max(packet.record.captured_length for packet in packets)
+    snaplen = max(65535, max_length)
+
+    with path.open("wb") as handle:
+        # Write a little-endian PCAP file with nanosecond timestamps.
+        handle.write(struct.pack(
+            "<IHHIIII",
+            0xA1B23C4D,
+            2,
+            4,
+            0,
+            0,
+            snaplen,
+            link_type,
+        ))
+
         for packet in packets:
             record = packet.record
             timestamp = record.timestamp or 0.0
@@ -88,12 +100,13 @@ def _export_pcap(path: Path, packets: list[ProcessedPacket]) -> None:
             if nanoseconds >= 1_000_000_000:
                 seconds += 1
                 nanoseconds = 0
-            writer.write_packet(
-                record.data,
-                sec=seconds,
-                usec=nanoseconds,
-                caplen=record.captured_length,
-                wirelen=record.original_length,
-            )
-    finally:
-        writer.close()
+            if seconds > 0xFFFFFFFF:
+                raise CaptureExportError("PCAP timestamp exceeds the format limit")
+            handle.write(struct.pack(
+                "<IIII",
+                seconds,
+                nanoseconds,
+                record.captured_length,
+                record.original_length,
+            ))
+            handle.write(record.data)
