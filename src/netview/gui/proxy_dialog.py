@@ -11,10 +11,44 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
+    QPlainTextEdit,
     QVBoxLayout,
 )
 
 from netview.core.proxy import HTTPProxy, ProxyError
+
+
+class HTTPMessageDialog(QDialog):
+    def __init__(self, entry, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"{entry.method} · {entry.url}")
+        self.resize(900, 650)
+        layout = QVBoxLayout(self)
+        summary = QLabel(
+            f"Status: {entry.status if entry.status is not None else 'Failed'}"
+            f"    ·    Request body: {entry.request_bytes} B"
+            f"    ·    Response body: {entry.response_bytes} B"
+        )
+        summary.setWordWrap(True)
+        layout.addWidget(summary)
+        warning = QLabel(
+            "Captured messages may contain cookies or authorization data. "
+            "They are kept in memory only; clear history or close NetView to discard them."
+        )
+        warning.setWordWrap(True)
+        layout.addWidget(warning)
+        tabs = QTabWidget()
+        for title, raw in (
+            ("Request", entry.request_message),
+            ("Response", entry.response_message),
+        ):
+            view = QPlainTextEdit()
+            view.setReadOnly(True)
+            view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+            view.setPlainText(raw.decode("utf-8", "replace") if raw else entry.note or "No message captured.")
+            tabs.addTab(view, title)
+        layout.addWidget(tabs)
 
 
 class ProxyDialog(QDialog):
@@ -64,6 +98,7 @@ class ProxyDialog(QDialog):
         )
         self.history_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.history_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.history_table.cellDoubleClicked.connect(self.show_entry)
         self.history_table.setAlternatingRowColors(True)
         self.history_table.horizontalHeader().setStretchLastSection(True)
         self.history_table.setColumnWidth(0, 105)
@@ -131,6 +166,11 @@ class ProxyDialog(QDialog):
         ]
         if not QProcess.startDetached(browser, arguments):
             QMessageBox.warning(self, "Chromium could not start", "Could not launch Chromium.")
+
+    def show_entry(self, row: int, _column: int) -> None:
+        entries = self.proxy.history
+        if 0 <= row < len(entries):
+            HTTPMessageDialog(entries[row], self).exec()
 
     def clear_history(self) -> None:
         self.proxy.clear_history()

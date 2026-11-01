@@ -12,7 +12,8 @@ from urllib.parse import urlsplit
 
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
-MAX_HISTORY = 500
+MAX_HISTORY = 100
+MAX_HISTORY_BYTES = 64 * 1024 * 1024
 _HOP_HEADERS = {
     "connection", "proxy-connection", "keep-alive", "proxy-authenticate",
     "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade",
@@ -30,6 +31,8 @@ class ProxyEntry:
     request_bytes: int
     response_bytes: int
     note: str = ""
+    request_message: bytes = b""
+    response_message: bytes = b""
 
 
 class ProxyError(RuntimeError):
@@ -104,17 +107,35 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         headers["Host"] = target.netloc
         headers["Connection"] = "close"
 
+        body = b""
+        request_message = b""
+        response_message = b""
         try:
-            body = self.rfile.read(length) if length else None
+            body = self.rfile.read(length) if length else b""
+            request_message = self.raw_requestline + self.headers.as_bytes() + b"\\r\\n" + body
             connection = HTTPConnection(target.hostname, port, timeout=8)
             try:
-                connection.request(self.command, path, body=body, headers=headers)
+                connection.request(self.command, path, body=body or None, headers=headers)
                 response = connection.getresponse()
                 response_body = response.read(MAX_RESPONSE_BYTES + 1)
                 truncated = len(response_body) > MAX_RESPONSE_BYTES
                 response_body = response_body[:MAX_RESPONSE_BYTES]
+                response_headers = response.getheaders()
+
+                response_message = (
+                    f"HTTP/{response.version // 10}.{response.version % 10} "
+                    f"{response.status} {response.reason or ''}\\r\\n"
+                ).encode("latin-1", "replace")
+                for name, value in response_headers:
+                    if name.lower() not in _HOP_HEADERS and name.lower() != "content-length":
+                        response_message += f"{name}: {value}\\r\\n".encode("latin-1", "replace")
+                response_message += (
+                    f"Content-Length: {len(response_body)}\\r\\n"
+                    "Connection: close\\r\\n\\r\\n"
+                ).encode("ascii") + response_body
+
                 self.send_response(response.status, response.reason)
-                for name, value in response.getheaders():
+                for name, value in response_headers:
                     lower = name.lower()
                     if lower not in _HOP_HEADERS and lower != "content-length":
                         self.send_header(name, value)
@@ -125,31 +146,33 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                     self.wfile.write(response_body)
                 self.close_connection = True
                 self.owner._record(ProxyEntry(
-                    timestamp=time(),
-                    method=self.command,
-                    url=self.path,
+                    timestamp=time(), method=self.command, url=self.path,
                     status=response.status,
                     request_headers=tuple(sorted(
                         name for name in self.headers
                         if name.lower() not in _SENSITIVE_HEADERS
                     )),
-                    request_bytes=length,
-                    response_bytes=len(response_body),
+                    request_bytes=len(body), response_bytes=len(response_body),
                     note="Response truncated at 4 MiB" if truncated else "",
+                    request_message=request_message,
+                    response_message=response_message,
                 ))
             finally:
                 connection.close()
         except (OSError, HTTPException, ValueError) as exc:
+            if not request_message:
+                request_message = self.raw_requestline + self.headers.as_bytes() + b"\\r\\n" + body
+            try:
+                self._respond_error(502, "Upstream request failed")
+            except OSError:
+                pass
             self.owner._record(ProxyEntry(
                 timestamp=time(), method=self.command, url=self.path,
                 status=None, request_headers=tuple(sorted(self.headers.keys())),
-                request_bytes=length, response_bytes=0, note=str(exc)[:240],
+                request_bytes=len(body), response_bytes=0, note=str(exc)[:240],
+                request_message=request_message,
+                response_message=b"",
             ))
-            if not self.wfile.closed:
-                try:
-                    self._respond_error(502, "Upstream request failed")
-                except OSError:
-                    pass
 
     def do_CONNECT(self) -> None:
         host, separator, port_text = self.path.rpartition(":")
@@ -215,6 +238,7 @@ class HTTPProxy:
         self._server: _ProxyServer | None = None
         self._thread: Thread | None = None
         self._history: list[ProxyEntry] = []
+        self._history_bytes = 0
         self._lock = RLock()
 
     @property
@@ -235,11 +259,16 @@ class HTTPProxy:
     def clear_history(self) -> None:
         with self._lock:
             self._history.clear()
+            self._history_bytes = 0
 
     def _record(self, entry: ProxyEntry) -> None:
+        size = len(entry.request_message) + len(entry.response_message)
         with self._lock:
             self._history.append(entry)
-            del self._history[:-MAX_HISTORY]
+            self._history_bytes += size
+            while len(self._history) > MAX_HISTORY or self._history_bytes > MAX_HISTORY_BYTES:
+                removed = self._history.pop(0)
+                self._history_bytes -= len(removed.request_message) + len(removed.response_message)
 
     def start(self) -> tuple[str, int]:
         if self._server is not None:

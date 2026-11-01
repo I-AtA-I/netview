@@ -15,6 +15,15 @@ class _OriginHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        response = b"echo:" + body
+        self.send_response(201)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
     def log_message(self, *_args):
         return
 
@@ -52,6 +61,8 @@ def test_proxy_forwards_http_and_records_metadata(origin):
         assert entries[0].status == 200
         assert entries[0].url.endswith("/check")
         assert entries[0].response_bytes == len(b"origin response")
+        assert b"GET http://127.0.0.1" in entries[0].request_message
+        assert b"origin response" in entries[0].response_message
     finally:
         proxy.stop()
 
@@ -67,3 +78,39 @@ def test_proxy_history_is_bounded():
         from netview.core.proxy import ProxyEntry
         proxy._record(ProxyEntry(index, "GET", "/", 200, (), 0, 0))
     assert len(proxy.history) == 500
+
+
+
+def test_proxy_captures_request_and_response_bodies(origin):
+    proxy = HTTPProxy(port=0)
+    host, port = proxy.start()
+    body = b'{"hello":"netview"}'
+    try:
+        with create_connection((host, port), timeout=3) as client:
+            client.sendall(
+                f"POST http://127.0.0.1:{origin}/echo HTTP/1.1\\r\\n"
+                f"Host: 127.0.0.1:{origin}\\r\\n"
+                f"Content-Type: application/json\\r\\n"
+                f"Content-Length: {len(body)}\\r\\n"
+                "Connection: close\\r\\n\\r\\n".encode() + body
+            )
+            response = bytearray()
+            while chunk := client.recv(4096):
+                response.extend(chunk)
+        assert b"201 Created" in response
+        entry = proxy.history[-1]
+        assert body in entry.request_message
+        assert b"echo:" + body in entry.response_message
+        assert "Content-Type" in entry.request_headers
+    finally:
+        proxy.stop()
+
+
+def test_proxy_history_clear_releases_captured_messages():
+    from netview.core.proxy import ProxyEntry
+
+    proxy = HTTPProxy()
+    proxy._record(ProxyEntry(1, "GET", "/", 200, (), 0, 0, request_message=b"request"))
+    proxy.clear_history()
+    assert proxy.history == ()
+    assert proxy._history_bytes == 0
