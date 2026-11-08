@@ -180,6 +180,12 @@ class TCPFlowGraphDialog(QDialog):
         )
         root.addWidget(summary)
 
+        legend = QLabel(
+            "Teal · packet  |  Blue · SYN / FIN  |  Orange · possible sequence overlap  |  Red · RST"
+        )
+        legend.setStyleSheet("color: #91a5b2; font-size: 8pt; padding: 2px 4px;")
+        root.addWidget(legend)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
