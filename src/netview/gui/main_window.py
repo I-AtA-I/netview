@@ -496,10 +496,11 @@ class MainWindow(QMainWindow):
         self.pause_capture_action.setText("Resume live capture" if paused else "Pause live capture")
         self.pause_capture_button.setEnabled(worker_can_pause)
         self.pause_capture_action.setEnabled(worker_can_pause)
-        self.stop_capture_button.setEnabled(capturing)
+        can_stop = capturing and not self._live_capture_stopping
+        self.stop_capture_button.setEnabled(can_stop)
         self.start_capture_action.setEnabled(idle and has_interfaces)
-        self.pause_capture_action.setEnabled(worker_can_pause)
-        self.stop_capture_action.setEnabled(capturing)
+        self.pause_capture_action.setEnabled(worker_can_pause and not self._live_capture_stopping)
+        self.stop_capture_action.setEnabled(can_stop)
         self.open_action.setEnabled(idle)
         self.close_action.setEnabled(idle and self.model.total_count > 0)
         self.follow_stream_action.setEnabled(
