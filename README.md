@@ -10,8 +10,12 @@ NetView is a desktop network protocol analyzer built with Python and PySide6. It
 - Dissect HTTP/1.x request/response start lines and selected non-credential headers.
 - Dissect TLS records plus ClientHello/ServerHello metadata such as SNI, ALPN, supported versions and cipher suites.
 - Identify common non-decoded Ethernet protocols such as LLDP, EAPOL, MPLS and PPPoE by EtherType.
-- Display packet metadata, protocol details and a raw hexadecimal/ASCII view.
-- Review capture-wide protocol, endpoint and port statistics in a dedicated overview.
+- Display packet metadata, protocol details and a raw hexadecimal/ASCII view with field-to-byte highlighting for decoded Ethernet, ARP, IPv4/IPv6, TCP, UDP and ICMP fields.
+- Search packet numbers, endpoints, protocols, packet summaries and parsed DNS/HTTP/TLS metadata with Ctrl+F.
+- Add packet bookmarks and notes; notes can be saved to a JSON sidecar next to a capture and are loaded again when that capture is opened.
+- Review capture-wide protocol distribution, top endpoints, TCP/UDP conversations, bytes, durations and a packet-rate timeline in the Analysis Center (Ctrl+Shift+S).
+- Inspect TCP sequence overlaps, possible retransmissions, out-of-order observations and repeated ACKs using capture-based heuristics.
+- Browse consolidated DNS, HTTP/1.x, TLS handshake metadata and dissection warnings, then jump from an event or conversation to its packet.
 - Highlight protocol families and dissection warnings directly in the packet list.
 - Filter packets with the built-in display-filter language.
 - Load capture files in a background thread so the interface stays responsive during import.
@@ -130,7 +134,7 @@ Live capture uses `dumpcap` on one interface selected by the user. Promiscuous m
 
 Only capture traffic on your own device and networks, or where you have explicit permission to monitor. Captured traffic may contain private information.
 
-The GUI uses a dedicated capture sidebar and a packet workspace with protocol-aware row accents, a decoded-layer inspector and a raw byte view. Capture statistics are calculated across the full capture and are independent of the active display filter. The application loads packets into memory after reading them in batches. It keeps the UI responsive during import, but very large capture files can still consume substantial memory.
+The GUI uses a dedicated capture sidebar and a packet workspace with protocol-aware row accents, a decoded-layer inspector and a raw byte view. Selecting a mapped protocol field highlights its corresponding captured bytes in the hex view; fields for which a reliable byte offset is not available remain unhighlighted. The Analysis Center works across the full capture and is independent of the active display filter. TCP sequence indicators are explicitly heuristic: capture gaps, truncation and capture order can resemble retransmission or reordering, so NetView does not label them as proven packet loss. TLS analysis reports visible handshake metadata only and never decrypts application data. Packet notes are stored separately from the PCAP in a *.netview.json sidecar file and can be saved with File → Save packet notes. The application loads packets into memory after reading them in batches. It keeps the UI responsive during import, but very large capture files can still consume substantial memory.
 
 ## Project layout
 
@@ -138,9 +142,9 @@ The GUI uses a dedicated capture sidebar and a packet workspace with protocol-aw
 src/netview/
 ├── app.py
 ├── capture/       # PCAP/PCAPNG reader and live capture helpers
-├── core/          # packet models, protocol parsers, dissection pipeline and TCP reassembly
+├── core/          # packet models, protocol parsers, capture analytics and TCP reassembly
 ├── filters/       # display-filter parser and evaluator
-└── gui/           # PySide6 window, packet table, capture workers and stream viewer
+└── gui/           # PySide6 window, notes, analysis center, capture workers and stream viewer
 
 tests/             # parser, pipeline, capture and filter tests
 ```
@@ -168,3 +172,20 @@ QT_QPA_PLATFORM=xcb python -m netview
 ```
 
 Do not set this globally unless you specifically need it; on a working Wayland session, the default platform selection should be allowed.
+
+
+## Analysis and navigation
+
+- Ctrl+F opens packet search. Search continues after the current packet and wraps to the beginning.
+- Ctrl+B adds or edits a note for the selected packet. A star appears in the packet row while a note exists.
+- Ctrl+Shift+E opens the packet-note save dialog. For file captures, the default path is the capture filename followed by .netview.json; opening that capture loads the sidecar automatically.
+- Ctrl+Shift+S opens the Analysis Center. Double-click a conversation, TCP diagnostic or protocol event to select its packet in the main workspace.
+- Selecting a decoded field highlights its known byte range in the hexadecimal viewer. Byte ranges are only attached where parser offsets are reliable.
+
+The Analysis Center includes:
+- protocol and endpoint summaries, top conversations and a time-bucket packet chart;
+- conversation endpoints, packet and byte counts, duration and first-frame navigation;
+- TCP segment overlap/reordering and repeated-ACK indicators;
+- DNS, HTTP and TLS metadata events with packet navigation.
+
+TCP anomaly labels are heuristic observations from the captured sequence and ACK values. They are not proof of packet loss or a network fault. The TCP analysis does not fabricate missing bytes. TLS details are limited to metadata visible in the capture; encrypted application data is not decoded.
