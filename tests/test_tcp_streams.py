@@ -328,6 +328,27 @@ def test_selected_stream_keeps_global_stream_id():
     assert stream.stream_id == 1
 
 
+
+def test_selected_stream_can_be_cancelled_during_packet_scan():
+    from netview.core.streams import build_tcp_stream
+
+    first = make_tcp_packet(1, sequence=100, payload=b"one")
+    second = make_tcp_packet(2, sequence=103, payload=b"two")
+    key, _ = tcp_stream_key_for_packet(first)
+    checks = 0
+
+    def should_stop():
+        nonlocal checks
+        checks += 1
+        return checks == 2
+
+    assert build_tcp_stream(
+        [first, second],
+        key,
+        should_stop=should_stop,
+    ) is None
+
+
 def test_ip_fragment_is_excluded_until_ip_reassembly_exists():
     packet = make_tcp_packet(1, sequence=100, payload=b"part")
     frame = bytearray(packet.record.data)

@@ -137,6 +137,8 @@ class MainWindow(QMainWindow):
         self._stream_worker: TCPStreamWorker | None = None
         self._flow_worker: TCPFlowWorker | None = None
         self._flow_failed = False
+        self._close_pending = False
+        self._close_pending_workers = set()
 
         self._build_actions()
         self._build_ui()
@@ -1520,17 +1522,49 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def closeEvent(self, event) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.requestInterruption()
-            self._worker.wait()
-        if self._live_worker is not None and self._live_worker.isRunning():
-            self._live_worker.stop()
-            self._live_worker.wait()
-        if self._stream_worker is not None and self._stream_worker.isRunning():
-            self._stream_worker.wait()
-        if self._flow_worker is not None and self._flow_worker.isRunning():
-            self._flow_worker.wait()
+        if not self._close_pending:
+            self._close_pending = True
+            workers = tuple(
+                worker
+                for worker in (
+                    self._worker,
+                    self._live_worker,
+                    self._stream_worker,
+                    self._flow_worker,
+                )
+                if worker is not None
+            )
+
+            for worker in workers:
+                if not worker.isRunning():
+                    continue
+                finished = getattr(worker, "finished", None)
+                if finished is not None:
+                    self._close_pending_workers.add(worker)
+                    finished.connect(self._finish_close_when_idle)
+                    if not worker.isRunning():
+                        self._close_pending_workers.discard(worker)
+
+            for worker in workers:
+                if not worker.isRunning():
+                    continue
+                if worker is self._live_worker:
+                    worker.stop()
+                elif hasattr(worker, "requestInterruption"):
+                    worker.requestInterruption()
+
+        if self._close_pending_workers:
+            self.statusBar().showMessage("Stopping background tasks…")
+            event.ignore()
+            return
         event.accept()
+
+    def _finish_close_when_idle(self) -> None:
+        worker = self.sender()
+        if worker is not None:
+            self._close_pending_workers.discard(worker)
+        if self._close_pending and not self._close_pending_workers:
+            self.close()
 
     def _update_counts(self) -> None:
         self.count_status.setText(

@@ -6,6 +6,7 @@ import signal
 import subprocess
 import tempfile
 import threading
+from time import monotonic
 
 from PySide6.QtCore import QThread, Signal
 
@@ -218,15 +219,25 @@ class LiveCaptureWorker(QThread):
                 reader.start()
                 self.capture_started.emit()
 
+                stop_started_at: float | None = None
+                forced_stop = False
                 while not self._reader_done.wait(self.FLUSH_INTERVAL_SECONDS):
                     self._flush_pending()
-                    if self._stop_event.is_set():
-                        process = self._process
-                        if process is not None and process.poll() is None:
-                            try:
-                                process.terminate()
-                            except OSError:
-                                pass
+                    process = self._process
+                    if self._stop_event.is_set() and process is not None:
+                        if process.poll() is None:
+                            if stop_started_at is None:
+                                stop_started_at = monotonic()
+                                try:
+                                    process.terminate()
+                                except OSError:
+                                    pass
+                            elif not forced_stop and monotonic() - stop_started_at >= 1.0:
+                                forced_stop = True
+                                try:
+                                    process.kill()
+                                except OSError:
+                                    pass
 
                 reader.join(timeout=2)
                 self._flush_pending()

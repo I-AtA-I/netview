@@ -24,7 +24,10 @@ class TCPFlowWorker(QThread):
             graph: TCPFlowGraph | None = build_tcp_flow_graph(
                 self.packets,
                 self.target_key,
+                should_stop=self.isInterruptionRequested,
             )
-            self.graph_ready.emit(graph)
+            if not self.isInterruptionRequested():
+                self.graph_ready.emit(graph)
         except Exception as exc:
-            self.analysis_failed.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.analysis_failed.emit(str(exc))

@@ -168,6 +168,27 @@ def test_flow_graph_does_not_mix_other_tcp_conversations():
     assert [event.packet_number for event in graph.events] == [1]
 
 
+
+def test_flow_graph_can_be_cancelled_during_packet_scan():
+    packets = [
+        make_ipv4_tcp(1, sequence=100, payload=b"one"),
+        make_ipv4_tcp(2, sequence=103, payload=b"two"),
+    ]
+    key, _ = tcp_flow_key_for_packet(packets[0])
+    checks = 0
+
+    def should_stop():
+        nonlocal checks
+        checks += 1
+        return checks == 2
+
+    assert build_tcp_flow_graph(
+        packets,
+        key,
+        should_stop=should_stop,
+    ) is None
+
+
 def test_flow_graph_returns_none_when_no_matching_conversation():
     packet = make_ipv4_tcp(1)
     other = make_ipv4_tcp(2, destination_port=80)

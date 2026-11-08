@@ -24,7 +24,7 @@ class CaptureLoadWorker(QThread):
         try:
             for record in iter_capture_file(self.path):
                 if self.isInterruptionRequested():
-                    break
+                    return
 
                 batch.append(process_packet(record))
                 count += 1
@@ -33,6 +33,8 @@ class CaptureLoadWorker(QThread):
                     self.batch_ready.emit(batch)
                     batch = []
 
+            if self.isInterruptionRequested():
+                return
             if batch:
                 self.batch_ready.emit(batch)
 

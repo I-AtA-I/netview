@@ -23,7 +23,10 @@ class TCPStreamWorker(QThread):
             stream: TCPStream | None = build_tcp_stream(
                 self.packets,
                 self.target_key,
+                should_stop=self.isInterruptionRequested,
             )
-            self.stream_ready.emit(stream)
+            if not self.isInterruptionRequested():
+                self.stream_ready.emit(stream)
         except Exception as exc:
-            self.analysis_failed.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.analysis_failed.emit(str(exc))

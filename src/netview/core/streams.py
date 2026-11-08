@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from .pipeline import ProcessedPacket
@@ -113,7 +113,12 @@ class _DirectionBuilder:
                 )
             )
 
-    def finish(self) -> ReassembledDirection:
+    def finish(
+        self,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> ReassembledDirection | None:
+        if should_stop is not None and should_stop():
+            return None
         if not self.segments:
             return ReassembledDirection(
                 chunks=(),
@@ -138,6 +143,8 @@ class _DirectionBuilder:
         overlapping_bytes = 0
 
         for segment in segments[1:]:
+            if should_stop is not None and should_stop():
+                return None
             start = segment.sequence_offset
             end = start + len(segment.data)
 
@@ -219,17 +226,23 @@ class _StreamBuilder:
                 self.first_timestamp = packet.timestamp
             self.last_timestamp = packet.timestamp
 
-    def finish(self) -> TCPStream:
+    def finish(
+        self,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> TCPStream | None:
+        first_direction = self.directions[0].finish(should_stop)
+        if first_direction is None:
+            return None
+        second_direction = self.directions[1].finish(should_stop)
+        if second_direction is None:
+            return None
         return TCPStream(
             stream_id=self.stream_id,
             key=self.key,
             packet_count=self.packet_count,
             first_timestamp=self.first_timestamp,
             last_timestamp=self.last_timestamp,
-            directions=(
-                self.directions[0].finish(),
-                self.directions[1].finish(),
-            ),
+            directions=(first_direction, second_direction),
         )
 
 
@@ -261,12 +274,16 @@ def tcp_stream_key_for_packet(packet: ProcessedPacket) -> tuple[TCPStreamKey, in
 def build_tcp_stream(
     packets: Iterable[ProcessedPacket],
     target_key: TCPStreamKey,
+    *,
+    should_stop: Callable[[], bool] | None = None,
 ) -> TCPStream | None:
     """Build only one selected conversation instead of retaining every flow."""
     seen_keys: set[TCPStreamKey] = set()
     builder: _StreamBuilder | None = None
 
     for packet in packets:
+        if should_stop is not None and should_stop():
+            return None
         key_result = tcp_stream_key_for_packet(packet)
         if key_result is None:
             continue
@@ -281,7 +298,9 @@ def build_tcp_stream(
         if key == target_key and builder is not None:
             builder.add(packet, direction_index)
 
-    return builder.finish() if builder is not None else None
+    if builder is None or (should_stop is not None and should_stop()):
+        return None
+    return builder.finish(should_stop)
 
 
 def build_tcp_streams(packets: Iterable[ProcessedPacket]) -> list[TCPStream]:
@@ -311,4 +330,9 @@ def build_tcp_streams(packets: Iterable[ProcessedPacket]) -> list[TCPStream]:
 
         builder.add(packet, direction_index)
 
-    return [builder.finish() for builder in builders.values()]
+    streams = []
+    for builder in builders.values():
+        stream = builder.finish()
+        if stream is not None:
+            streams.append(stream)
+    return streams

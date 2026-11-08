@@ -53,14 +53,44 @@ class RunningWorker:
     can_pause = False
     is_paused = False
 
+    def __init__(self):
+        self.running = True
+
     def isRunning(self):
-        return True
+        return self.running
 
     def stop(self):
-        pass
+        self.running = False
 
     def wait(self):
         return True
+
+
+
+def test_close_requests_analysis_worker_interruption_without_blocking(qtbot, monkeypatch):
+    from PySide6.QtCore import QThread
+
+    class InterruptibleWorker(QThread):
+        def run(self):
+            while not self.isInterruptionRequested():
+                self.msleep(5)
+            self.msleep(150)
+
+    monkeypatch.setattr("netview.gui.main_window.list_interfaces", lambda: ["lo"])
+    window = MainWindow()
+    qtbot.addWidget(window)
+    worker = InterruptibleWorker(window)
+    window._stream_worker = worker
+    window.show()
+    worker.start()
+    qtbot.waitUntil(worker.isRunning, timeout=3000)
+
+    window.close()
+
+    assert worker.isInterruptionRequested()
+    assert window.isVisible()
+    qtbot.waitUntil(lambda: not worker.isRunning(), timeout=3000)
+    qtbot.waitUntil(lambda: not window.isVisible(), timeout=3000)
 
 
 def test_packet_tools_remain_available_during_live_capture(qtbot, monkeypatch):

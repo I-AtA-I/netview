@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from bisect import bisect_left
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from .pipeline import ProcessedPacket
@@ -102,6 +102,8 @@ def tcp_flow_key_for_packet(
 def build_tcp_flow_graph(
     packets: Iterable[ProcessedPacket],
     target_key: TCPStreamKey,
+    *,
+    should_stop: Callable[[], bool] | None = None,
 ) -> TCPFlowGraph | None:
     """Build a TCP sequence diagram for one conversation.
 
@@ -111,9 +113,12 @@ def build_tcp_flow_graph(
     raw_events: list[tuple[ProcessedPacket, int, int, int | None, bool, bool]] = []
     base_sequences: list[int | None] = [None, None]
     observed_ranges: list[list[tuple[int, int]]] = [[], []]
-    timestamps: list[float] = []
+    first_timestamp: float | None = None
+    last_timestamp: float | None = None
 
     for packet in packets:
+        if should_stop is not None and should_stop():
+            return None
         key_result = tcp_flow_key_for_packet(packet)
         if key_result is None:
             continue
@@ -158,21 +163,32 @@ def build_tcp_flow_graph(
             truncated,
         ))
         if packet.timestamp is not None:
-            timestamps.append(packet.timestamp)
+            if first_timestamp is None or packet.timestamp < first_timestamp:
+                first_timestamp = packet.timestamp
+            if last_timestamp is None or packet.timestamp > last_timestamp:
+                last_timestamp = packet.timestamp
 
-    if not raw_events:
+    if not raw_events or (should_stop is not None and should_stop()):
         return None
-
-    first_timestamp = min(timestamps) if timestamps else None
-    last_timestamp = max(timestamps) if timestamps else None
     duration = (
         max(0.0, last_timestamp - first_timestamp)
         if first_timestamp is not None and last_timestamp is not None
         else None
     )
 
-    events = tuple(
-        TCPFlowEvent(
+    events = []
+    overlap_count = 0
+    for (
+        packet,
+        direction,
+        sequence_offset,
+        acknowledgment,
+        possible_overlap,
+        truncated,
+    ) in raw_events:
+        if should_stop is not None and should_stop():
+            return None
+        events.append(TCPFlowEvent(
             packet_number=packet.number,
             timestamp=packet.timestamp,
             elapsed_seconds=(
@@ -188,20 +204,12 @@ def build_tcp_flow_graph(
             flags=packet.dissection.tcp.active_flags,
             possible_overlap=possible_overlap,
             truncated=truncated,
-        )
-        for (
-            packet,
-            direction,
-            sequence_offset,
-            acknowledgment,
-            possible_overlap,
-            truncated,
-        ) in raw_events
-    )
+        ))
+        overlap_count += int(possible_overlap)
 
     return TCPFlowGraph(
         key=target_key,
-        events=events,
+        events=tuple(events),
         duration_seconds=duration,
-        overlap_count=sum(event.possible_overlap for event in events),
+        overlap_count=overlap_count,
     )
