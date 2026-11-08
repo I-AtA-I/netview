@@ -121,3 +121,35 @@ def test_empty_analysis_is_valid():
     assert result.conversations == ()
     assert result.tcp_diagnostics == ()
     assert result.traffic_buckets == ()
+
+
+def test_analysis_reports_out_of_order_tcp_segment():
+    packets = [
+        make_tcp_packet(1, sequence=103, payload=b"def"),
+        make_tcp_packet(2, sequence=100, payload=b"abc"),
+    ]
+
+    result = analyze_capture(packets)
+
+    assert len(result.tcp_diagnostics) == 1
+    assert result.tcp_diagnostics[0].category == "Out-of-order segment"
+    assert result.tcp_diagnostics[0].packet_number == 2
+
+
+def test_analysis_does_not_flag_truncated_payload_as_retransmission():
+    packet = make_tcp_packet(1, sequence=100, payload=b"abc")
+    record = packet.record
+    truncated = process_packet(
+        PacketRecord(
+            number=2,
+            timestamp=2.0,
+            captured_length=record.captured_length,
+            original_length=record.original_length + 10,
+            link_type=record.link_type,
+            data=record.data,
+        )
+    )
+
+    result = analyze_capture([packet, truncated])
+
+    assert result.tcp_diagnostics == ()
