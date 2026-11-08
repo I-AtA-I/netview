@@ -10,3 +10,8 @@ dist/
 .env
 .idea/
 captures/
+
+# Nuitka standalone and onefile build artifacts
+*.dist/
+*.build/
+*.onefile-build/
