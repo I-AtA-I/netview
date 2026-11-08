@@ -1,12 +1,13 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QFont, QKeySequence
+from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QComboBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QTableView,
     QTreeWidget,
     QTreeWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -29,6 +31,8 @@ from netview.core.streams import tcp_stream_key_for_packet
 from netview.filters import FilterSyntaxError
 from netview.gui.table_model import PacketTableModel
 
+from .analysis_dialog import AnalysisDialog
+from .annotations import annotation_sidecar_path, load_annotations, save_annotations
 from .live_worker import LiveCaptureWorker
 from .stream_dialog import TCPStreamDialog
 from .stream_worker import TCPStreamWorker
@@ -121,6 +125,8 @@ class MainWindow(QMainWindow):
         self._live_capture_error = False
         self._current_path: Path | None = None
         self._selected_packet: ProcessedPacket | None = None
+        self._annotations: dict[int, str] = {}
+        self._hex_data_length = 0
         self._stream_worker: TCPStreamWorker | None = None
 
         self._build_actions()
@@ -142,6 +148,17 @@ class MainWindow(QMainWindow):
         self.close_action.triggered.connect(self.close_capture)
         file_menu.addAction(self.close_action)
 
+        self.save_annotations_action = QAction("Save packet notes…", self)
+        self.save_annotations_action.setShortcut(QKeySequence("Ctrl+Shift+E"))
+        self.save_annotations_action.triggered.connect(self.save_packet_notes)
+        file_menu.addAction(self.save_annotations_action)
+
+        edit_menu = self.menuBar().addMenu("&Edit")
+        self.find_action = QAction("Find packet…", self)
+        self.find_action.setShortcut(QKeySequence("Ctrl+F"))
+        self.find_action.triggered.connect(self.find_packet)
+        edit_menu.addAction(self.find_action)
+
         capture_menu = self.menuBar().addMenu("&Capture")
         self.start_capture_action = QAction("Start live capture", self)
         self.start_capture_action.triggered.connect(self.start_live_capture)
@@ -152,11 +169,19 @@ class MainWindow(QMainWindow):
         capture_menu.addAction(self.stop_capture_action)
 
         analyze_menu = self.menuBar().addMenu("&Analyze")
-        self.statistics_action = QAction("Capture statistics", self)
+        self.statistics_action = QAction("Analysis center", self)
         self.statistics_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
-        self.statistics_action.triggered.connect(self.show_statistics)
+        self.statistics_action.triggered.connect(self.show_analysis_center)
         self.statistics_action.setEnabled(False)
         analyze_menu.addAction(self.statistics_action)
+        analyze_menu.addSeparator()
+        self.mark_packet_action = QAction("Add / edit packet note…", self)
+        self.mark_packet_action.setShortcut(QKeySequence("Ctrl+B"))
+        self.mark_packet_action.triggered.connect(self.mark_packet_note)
+        analyze_menu.addAction(self.mark_packet_action)
+        self.clear_packet_note_action = QAction("Remove packet note", self)
+        self.clear_packet_note_action.triggered.connect(self.remove_packet_note)
+        analyze_menu.addAction(self.clear_packet_note_action)
         analyze_menu.addSeparator()
         self.follow_stream_action = QAction("Follow TCP Stream", self)
         self.follow_stream_action.setShortcut(QKeySequence("Ctrl+Shift+T"))
@@ -313,7 +338,10 @@ class MainWindow(QMainWindow):
         self.details_tree.setHeaderLabels(["Decoded layer", "Field value"])
         self.details_tree.setColumnWidth(0, 255)
         self.details_tree.setAlternatingRowColors(True)
+        self.details_tree.currentItemChanged.connect(self._on_detail_field_changed)
 
+        self.hex_status = QLabel("Select a decoded field to highlight its bytes.")
+        self.hex_status.setStyleSheet("color: #8297a4; font-size: 8pt; padding: 2px 4px;")
         self.hex_view = QPlainTextEdit()
         self.hex_view.setReadOnly(True)
         self.hex_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
@@ -321,8 +349,15 @@ class MainWindow(QMainWindow):
         self.hex_view.setFont(QFont("monospace", 9))
 
         lower_splitter = QSplitter(Qt.Orientation.Horizontal)
+        hex_panel = QWidget()
+        hex_layout = QVBoxLayout(hex_panel)
+        hex_layout.setContentsMargins(0, 0, 0, 0)
+        hex_layout.setSpacing(4)
+        hex_layout.addWidget(self.hex_status)
+        hex_layout.addWidget(self.hex_view, 1)
+
         lower_splitter.addWidget(self.details_tree)
-        lower_splitter.addWidget(self.hex_view)
+        lower_splitter.addWidget(hex_panel)
         lower_splitter.setStretchFactor(0, 1)
         lower_splitter.setStretchFactor(1, 1)
 
@@ -359,8 +394,14 @@ class MainWindow(QMainWindow):
 
         path = Path(filename).expanduser()
         self._current_path = path
+        self._annotations = {}
+        try:
+            self._annotations = load_annotations(annotation_sidecar_path(path))
+        except ValueError as exc:
+            QMessageBox.warning(self, "Packet notes could not be loaded", str(exc))
         self.file_label.setText(path.name)
         self.model.clear()
+        self.model.set_annotations(self._annotations)
         self._clear_packet_details()
         self.filter_input.clear()
         self.filter_input.setEnabled(False)
@@ -434,6 +475,12 @@ class MainWindow(QMainWindow):
         self.follow_stream_action.setEnabled(idle and has_selected_tcp)
         self.statistics_action.setEnabled(idle and self.model.total_count > 0)
         self.follow_stream_button.setEnabled(idle and has_selected_tcp)
+        has_selection = self._selected_packet is not None
+        self.mark_packet_action.setEnabled(idle and has_selection)
+        self.clear_packet_note_action.setEnabled(
+            idle and has_selection and self._selected_packet.number in self._annotations
+        )
+        self.save_annotations_action.setEnabled(idle and bool(self._annotations))
 
     def refresh_interfaces(self) -> None:
         current = self.interface_combo.currentText()
@@ -476,6 +523,8 @@ class MainWindow(QMainWindow):
         self.filter_input.clear()
         self.filter_input.setStyleSheet("")
         self._current_path = None
+        self._annotations = {}
+        self.model.set_annotations(self._annotations)
         self._live_interface = interface
         self._live_capture_error = False
         self.file_label.setText(f"Live capture · {interface}")
@@ -566,6 +615,8 @@ class MainWindow(QMainWindow):
         if self._live_worker is not None and self._live_worker.isRunning():
             return
         self.model.clear()
+        self._annotations = {}
+        self.model.set_annotations(self._annotations)
         self._current_path = None
         self._live_interface = None
         self.file_label.setText("No capture loaded")
@@ -594,6 +645,9 @@ class MainWindow(QMainWindow):
         self._selected_packet = None
         self.details_tree.clear()
         self.hex_view.clear()
+        self.hex_view.setExtraSelections([])
+        self._hex_data_length = 0
+        self.hex_status.setText("Select a decoded field to highlight its bytes.")
         self._update_capture_controls()
 
     def _show_packet_details(self, packet: ProcessedPacket) -> None:
@@ -602,6 +656,12 @@ class MainWindow(QMainWindow):
 
         record = packet.record
         result = packet.dissection
+        network_offset = result.ethernet.payload_offset if result.ethernet is not None else 0
+        transport_offset = network_offset
+        if result.ipv4 is not None:
+            transport_offset += result.ipv4.header_length
+        elif result.ipv6 is not None:
+            transport_offset += result.ipv6.upper_layer_offset
 
         self._add_section("Frame", [
             ("Packet number", record.number),
@@ -619,7 +679,11 @@ class MainWindow(QMainWindow):
                 ("Type / Length", f"0x{eth.type_or_length:04x}"),
                 ("Decoded type", ETHERTYPE_NAMES.get(eth.type_or_length, "IEEE 802.3 length field" if eth.ether_type is None else "Unknown EtherType")),
                 ("Payload offset", f"{eth.payload_offset} bytes"),
-            ])
+            ], byte_ranges={
+                "Destination": (0, 6),
+                "Source": (6, 6),
+                "Type / Length": (12, 2),
+            })
             for index, tag in enumerate(eth.vlan_tags, start=1):
                 vlan = QTreeWidgetItem(item, [f"802.1Q VLAN tag {index}", ""])
                 self._add_child(vlan, "TPID", f"0x{tag.tpid:04x}")
@@ -629,6 +693,20 @@ class MainWindow(QMainWindow):
 
         if result.arp is not None:
             arp = result.arp
+            arp_ranges = {
+                "Hardware type": (network_offset, 2),
+                "Protocol type": (network_offset + 2, 2),
+                "Hardware size": (network_offset + 4, 1),
+                "Protocol size": (network_offset + 5, 1),
+                "Opcode": (network_offset + 6, 2),
+            }
+            if arp.hardware_length == 6 and arp.protocol_length == 4:
+                arp_ranges.update({
+                    "Sender MAC address": (network_offset + 8, 6),
+                    "Sender protocol address": (network_offset + 14, 4),
+                    "Target MAC address": (network_offset + 18, 6),
+                    "Target protocol address": (network_offset + 24, 4),
+                })
             self._add_section("Address Resolution Protocol", [
                 ("Hardware type", f"{arp.hardware_type_name} ({arp.hardware_type})"),
                 ("Protocol type", f"{arp.protocol_type_name} (0x{arp.protocol_type:04x})"),
@@ -639,7 +717,7 @@ class MainWindow(QMainWindow):
                 ("Sender protocol address", arp.sender_protocol_address),
                 ("Target MAC address", arp.target_hardware_address),
                 ("Target protocol address", arp.target_protocol_address),
-            ])
+            ], byte_ranges=arp_ranges)
 
         if result.ipv4 is not None:
             ip = result.ipv4
@@ -659,7 +737,13 @@ class MainWindow(QMainWindow):
                 ("Protocol number", ip.protocol),
                 ("Header checksum", f"0x{ip.header_checksum:04x}"),
                 ("Truncated", ip.is_truncated),
-            ])
+            ], byte_ranges={
+                "Identification": (network_offset + 4, 2),
+                "TTL": (network_offset + 8, 1),
+                "Protocol number": (network_offset + 9, 1),
+                "Source address": (network_offset + 12, 4),
+                "Destination address": (network_offset + 16, 4),
+            })
 
         if result.ipv6 is not None:
             ip = result.ipv6
@@ -676,7 +760,13 @@ class MainWindow(QMainWindow):
                 ("More fragments", ip.more_fragments),
                 ("Fragment identification", ip.fragment_identification if ip.fragment_identification is not None else "N/A"),
                 ("Truncated", ip.is_truncated),
-            ])
+            ], byte_ranges={
+                "Payload length": (network_offset + 4, 2),
+                "Initial next header": (network_offset + 6, 1),
+                "Hop limit": (network_offset + 7, 1),
+                "Source address": (network_offset + 8, 16),
+                "Destination address": (network_offset + 24, 16),
+            })
             for index, extension in enumerate(ip.extension_headers, start=1):
                 ext_item = QTreeWidgetItem(item, [f"Extension {index}: {extension.name}", ""])
                 self._add_child(ext_item, "Next header", extension.next_header)
@@ -699,6 +789,11 @@ class MainWindow(QMainWindow):
                     ("Sequence number", icmp.sequence_number if icmp.sequence_number is not None else "N/A"),
                     ("Header length", f"{icmp.header_length} bytes"),
                 ],
+                byte_ranges={
+                    "Type": (transport_offset, 1),
+                    "Code": (transport_offset + 1, 1),
+                    "Checksum": (transport_offset + 2, 2),
+                },
             )
 
         if result.tcp is not None:
@@ -716,7 +811,15 @@ class MainWindow(QMainWindow):
                 ("Checksum", f"0x{tcp.checksum:04x}"),
                 ("Urgent pointer", tcp.urgent_pointer),
                 ("Options", tcp.options.hex(" ") or "None"),
-            ])
+            ], byte_ranges={
+                "Source port": (transport_offset, 2),
+                "Destination port": (transport_offset + 2, 2),
+                "Sequence number": (transport_offset + 4, 4),
+                "Acknowledgment number": (transport_offset + 8, 4),
+                "Flags": (transport_offset + 13, 1),
+                "Window size": (transport_offset + 14, 2),
+                "Checksum": (transport_offset + 16, 2),
+            })
 
         if result.udp is not None:
             udp = result.udp
@@ -727,7 +830,12 @@ class MainWindow(QMainWindow):
                 ("Checksum", f"0x{udp.checksum:04x}"),
                 ("Captured length", f"{udp.captured_length} bytes"),
                 ("Truncated", udp.is_truncated),
-            ])
+            ], byte_ranges={
+                "Source port": (transport_offset, 2),
+                "Destination port": (transport_offset + 2, 2),
+                "Length": (transport_offset + 4, 2),
+                "Checksum": (transport_offset + 6, 2),
+            })
 
         if result.dns is not None:
             dns = result.dns
@@ -830,14 +938,156 @@ class MainWindow(QMainWindow):
 
         self.details_tree.expandToDepth(1)
         self.hex_view.setPlainText(self._format_hex(record.data))
+        self._hex_data_length = len(record.data)
+        self.hex_view.setExtraSelections([])
+        self.hex_status.setText(
+            f"{len(record.data):,} bytes · select a decoded field to highlight its captured byte range"
+        )
         self._update_capture_controls()
 
-    def show_statistics(self) -> None:
+    def _on_detail_field_changed(self, item, *_args) -> None:
+        if item is None:
+            self.hex_view.setExtraSelections([])
+            return
+        byte_range = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(byte_range, (tuple, list)) or len(byte_range) != 2:
+            self.hex_view.setExtraSelections([])
+            self.hex_status.setText("This decoded field has no mapped byte range.")
+            return
+        self._highlight_packet_bytes(int(byte_range[0]), int(byte_range[1]))
+
+    def _highlight_packet_bytes(self, offset: int, length: int) -> None:
+        selections = []
+        if offset < 0 or length <= 0 or offset >= self._hex_data_length:
+            self.hex_view.setExtraSelections([])
+            return
+        end = min(offset + length, self._hex_data_length)
+        current = offset
+        while current < end:
+            block_number = current // 16
+            byte_column = current % 16
+            count = min(end - current, 16 - byte_column)
+            block = self.hex_view.document().findBlockByNumber(block_number)
+            if not block.isValid():
+                break
+            cursor = QTextCursor(self.hex_view.document())
+            start = block.position() + 10 + byte_column * 3
+            cursor.setPosition(start)
+            cursor.setPosition(start + count * 3 - 1, QTextCursor.MoveMode.KeepAnchor)
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = cursor
+            selection.format = QTextCharFormat()
+            selection.format.setBackground(QColor("#35685f"))
+            selection.format.setForeground(QColor("#ffffff"))
+            selections.append(selection)
+            current += count
+        self.hex_view.setExtraSelections(selections)
+        self.hex_status.setText(f"Bytes {offset:,}–{end - 1:,} · length {end - offset:,} bytes")
+
+    def show_analysis_center(self) -> None:
         packets = tuple(self.model.iter_packets())
         if not packets:
             return
-        dialog = StatisticsDialog(list(packets), self)
+        dialog = AnalysisDialog(packets, self)
+        dialog.packet_requested.connect(self.jump_to_packet)
         dialog.exec()
+
+    def jump_to_packet(self, packet_number: int) -> None:
+        row = self.model.row_for_packet_number(packet_number)
+        if row < 0 and self.filter_input.text().strip():
+            self.filter_input.clear()
+            self.apply_filter()
+            row = self.model.row_for_packet_number(packet_number)
+        if row < 0:
+            return
+        index = self.model.index(row, 0)
+        self.packet_table.setCurrentIndex(index)
+        self.packet_table.scrollTo(index)
+        self.statusBar().showMessage(f"Selected packet #{packet_number}")
+
+    def find_packet(self) -> None:
+        query, accepted = QInputDialog.getText(
+            self, "Find packet", "Search packet fields, addresses or protocol metadata:"
+        )
+        needle = query.strip().casefold()
+        if not accepted or not needle:
+            return
+        packets = tuple(self.model.iter_packets())
+        if not packets:
+            return
+        start_number = self._selected_packet.number if self._selected_packet else 0
+        ordered = [packet for packet in packets if packet.number > start_number]
+        ordered.extend(packet for packet in packets if packet.number <= start_number)
+        for packet in ordered:
+            parts = [
+                str(packet.number), packet.source, packet.destination,
+                packet.protocol, packet.info,
+                str(packet.source_port or ""), str(packet.destination_port or ""),
+                *packet.dissection.errors,
+            ]
+            dns = packet.dissection.dns
+            if dns is not None:
+                parts.extend(question.name for question in dns.questions)
+                parts.extend(record.data for record in dns.answers)
+            http = packet.dissection.http
+            if http is not None:
+                parts.extend((http.host or "", http.target or "", http.method or "", str(http.status_code or "")))
+            tls = packet.dissection.tls
+            if tls is not None and tls.client_hello is not None:
+                parts.append(tls.client_hello.server_name or "")
+            if needle in " ".join(parts).casefold():
+                self.jump_to_packet(packet.number)
+                return
+        QMessageBox.information(self, "No match", f'No packet matched "{query}".')
+
+    def mark_packet_note(self) -> None:
+        packet = self._selected_packet
+        if packet is None:
+            return
+        current = self._annotations.get(packet.number, "")
+        note, accepted = QInputDialog.getMultiLineText(
+            self, f"Packet #{packet.number} note",
+            "Add a note or leave it empty to remove the note:", current,
+        )
+        if not accepted:
+            return
+        if note.strip():
+            self._annotations[packet.number] = note.strip()
+        else:
+            self._annotations.pop(packet.number, None)
+        self.model.set_annotations(self._annotations)
+        self._update_capture_controls()
+        self.statusBar().showMessage(f"Packet note updated for #{packet.number}; save notes to keep them.")
+
+    def remove_packet_note(self) -> None:
+        if self._selected_packet is None:
+            return
+        number = self._selected_packet.number
+        self._annotations.pop(number, None)
+        self.model.set_annotations(self._annotations)
+        self._update_capture_controls()
+        self.statusBar().showMessage(f"Packet note removed from #{number}")
+
+    def save_packet_notes(self) -> None:
+        if not self._annotations:
+            QMessageBox.information(self, "No packet notes", "There are no packet notes to save.")
+            return
+        default_path = (
+            str(annotation_sidecar_path(self._current_path))
+            if self._current_path is not None
+            else str(Path.home() / "netview-notes.json")
+        )
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Save packet notes", default_path, "NetView notes (*.netview.json *.json)"
+        )
+        if not filename:
+            return
+        try:
+            save_annotations(filename, self._annotations)
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "Could not save packet notes", str(exc))
+            return
+        self.statusBar().showMessage(f"Saved {len(self._annotations):,} packet note(s) to {filename}")
 
     def follow_tcp_stream(self) -> None:
         if self._stream_worker is not None:
@@ -894,16 +1144,28 @@ class MainWindow(QMainWindow):
         self._update_capture_controls()
         self.statusBar().showMessage("TCP stream analysis finished")
 
-    def _add_section(self, title: str, fields: list[tuple[str, object]]) -> QTreeWidgetItem:
+    def _add_section(
+        self,
+        title: str,
+        fields: list[tuple[str, object]],
+        byte_ranges: dict[str, tuple[int, int]] | None = None,
+    ) -> QTreeWidgetItem:
         section = QTreeWidgetItem(self.details_tree, [title, ""])
         section.setFlags(section.flags() & ~Qt.ItemFlag.ItemIsSelectable)
         for name, value in fields:
-            self._add_child(section, name, value)
+            self._add_child(section, name, value, (byte_ranges or {}).get(name))
         return section
 
     @staticmethod
-    def _add_child(parent: QTreeWidgetItem, name: str, value: object) -> None:
-        QTreeWidgetItem(parent, [str(name), str(value)])
+    def _add_child(
+        parent: QTreeWidgetItem,
+        name: str,
+        value: object,
+        byte_range: tuple[int, int] | None = None,
+    ) -> None:
+        item = QTreeWidgetItem(parent, [str(name), str(value)])
+        if byte_range is not None:
+            item.setData(0, Qt.ItemDataRole.UserRole, byte_range)
 
     @staticmethod
     def _format_hex(data: bytes) -> str:
