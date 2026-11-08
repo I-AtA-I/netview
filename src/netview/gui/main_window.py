@@ -472,13 +472,10 @@ class MainWindow(QMainWindow):
         capturing = self._live_worker is not None and self._live_worker.isRunning()
         analyzing = self._stream_worker is not None and self._stream_worker.isRunning()
         idle = not loading and not capturing and not analyzing
-        # Once Stop has been requested, the worker may still be draining its
-        # final batch. Existing captured packets remain safe to inspect while
-        # that cleanup finishes; starting another capture or loading a file
-        # still waits for the worker to exit.
-        packet_tools_available = not loading and (
-            not capturing or self._live_capture_stopping
-        )
+        # Analysis operates on a snapshot of packets already in the model.
+        # It does not need the live-capture worker to exit: the GUI owns all
+        # model updates, and stream reconstruction receives an immutable tuple.
+        packet_tools_available = not loading and self.model.total_count > 0
         has_interfaces = self.interface_combo.count() > 0
         has_selected_tcp = (
             self._selected_packet is not None
@@ -506,18 +503,19 @@ class MainWindow(QMainWindow):
         self.follow_stream_action.setEnabled(
             packet_tools_available and not analyzing and has_selected_tcp
         )
-        self.statistics_action.setEnabled(
-            packet_tools_available and self.model.total_count > 0
-        )
+        self.statistics_action.setEnabled(packet_tools_available)
         self.follow_stream_button.setEnabled(
             packet_tools_available and not analyzing and has_selected_tcp
         )
         has_selection = self._selected_packet is not None
-        self.mark_packet_action.setEnabled(idle and has_selection)
+        self.mark_packet_action.setEnabled(packet_tools_available and has_selection)
         self.clear_packet_note_action.setEnabled(
-            idle and has_selection and self._selected_packet.number in self._annotations
+            packet_tools_available and has_selection
+            and self._selected_packet.number in self._annotations
         )
-        self.save_annotations_action.setEnabled(idle and bool(self._annotations))
+        self.save_annotations_action.setEnabled(
+            packet_tools_available and bool(self._annotations)
+        )
 
     def refresh_interfaces(self) -> None:
         current = self.interface_combo.currentText()
