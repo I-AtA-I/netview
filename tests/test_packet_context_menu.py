@@ -42,6 +42,7 @@ def test_packet_context_menu_builds_filters_and_stream_action(qtbot, monkeypatch
     filter_menu = menu.actions()[0].menu()
     filter_actions = {action.text(): action for action in filter_menu.actions()}
 
+    assert "TCP Flow Graph" in menu_actions
     assert "Follow TCP Stream" in menu_actions
     assert "Copy packet bytes (hex)" in menu_actions
     assert "Protocol: TCP" in filter_actions
@@ -50,6 +51,11 @@ def test_packet_context_menu_builds_filters_and_stream_action(qtbot, monkeypatch
 
     filter_actions["Protocol: TCP"].trigger()
     assert window.filter_input.text() == "tcp"
+
+    window.model.append_packets([packet])
+    window._selected_packet = packet
+    window._update_capture_controls()
+    assert window.tcp_flow_action.isEnabled()
 
     window.close()
 
