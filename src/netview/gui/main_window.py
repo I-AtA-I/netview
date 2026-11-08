@@ -133,6 +133,7 @@ class MainWindow(QMainWindow):
         self._current_path: Path | None = None
         self._selected_packet: ProcessedPacket | None = None
         self._annotations: dict[int, str] = {}
+        self._annotations_dirty = False
         self._hex_data_length = 0
         self._stream_worker: TCPStreamWorker | None = None
         self._flow_worker: TCPFlowWorker | None = None
@@ -579,10 +580,13 @@ class MainWindow(QMainWindow):
         if self._live_worker is not None and self._live_worker.isRunning():
             self.statusBar().showMessage("Stop live capture before opening another capture.")
             return
+        if not self._confirm_unsaved_annotations():
+            return
 
         path = Path(filename).expanduser()
         self._current_path = path
         self._annotations = {}
+        self._annotations_dirty = False
         try:
             self._annotations = load_annotations(annotation_sidecar_path(path))
         except ValueError as exc:
@@ -698,7 +702,7 @@ class MainWindow(QMainWindow):
             and self._selected_packet.number in self._annotations
         )
         self.save_annotations_action.setEnabled(
-            packet_tools_available and bool(self._annotations)
+            packet_tools_available and (bool(self._annotations) or self._annotations_dirty)
         )
 
     def refresh_interfaces(self) -> None:
@@ -738,6 +742,8 @@ class MainWindow(QMainWindow):
         if not interface:
             QMessageBox.warning(self, "No interface selected", "Select a network interface first.")
             return
+        if not self._confirm_unsaved_annotations():
+            return
 
         self.model.clear()
         self._clear_packet_details()
@@ -745,6 +751,7 @@ class MainWindow(QMainWindow):
         self.filter_input.setStyleSheet("")
         self._current_path = None
         self._annotations = {}
+        self._annotations_dirty = False
         self.model.set_annotations(self._annotations)
         self._live_interface = interface
         self._live_capture_error = False
@@ -885,8 +892,11 @@ class MainWindow(QMainWindow):
             return
         if self._live_worker is not None and self._live_worker.isRunning():
             return
+        if not self._confirm_unsaved_annotations():
+            return
         self.model.clear()
         self._annotations = {}
+        self._annotations_dirty = False
         self.model.set_annotations(self._annotations)
         self._current_path = None
         self._live_interface = None
@@ -1327,6 +1337,7 @@ class MainWindow(QMainWindow):
         else:
             self._annotations.pop(packet.number, None)
         self.model.set_annotations(self._annotations)
+        self._annotations_dirty = True
         self._update_capture_controls()
         self.statusBar().showMessage(f"Packet note updated for #{packet.number}; save notes to keep them.")
 
@@ -1334,15 +1345,17 @@ class MainWindow(QMainWindow):
         if self._selected_packet is None:
             return
         number = self._selected_packet.number
-        self._annotations.pop(number, None)
+        if number in self._annotations:
+            self._annotations.pop(number)
+            self._annotations_dirty = True
         self.model.set_annotations(self._annotations)
         self._update_capture_controls()
         self.statusBar().showMessage(f"Packet note removed from #{number}")
 
-    def save_packet_notes(self) -> None:
-        if not self._annotations:
+    def save_packet_notes(self) -> bool:
+        if not self._annotations and not self._annotations_dirty:
             QMessageBox.information(self, "No packet notes", "There are no packet notes to save.")
-            return
+            return False
         default_path = (
             str(annotation_sidecar_path(self._current_path))
             if self._current_path is not None
@@ -1352,13 +1365,36 @@ class MainWindow(QMainWindow):
             self, "Save packet notes", default_path, "NetView notes (*.netview.json *.json)"
         )
         if not filename:
-            return
+            return False
         try:
             save_annotations(filename, self._annotations)
         except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "Could not save packet notes", str(exc))
             return
+        self._annotations_dirty = False
+        self._update_capture_controls()
         self.statusBar().showMessage(f"Saved {len(self._annotations):,} packet note(s) to {filename}")
+        return True
+
+    def _confirm_unsaved_annotations(self) -> bool:
+        if not self._annotations_dirty:
+            return True
+
+        choice = QMessageBox.warning(
+            self,
+            "Unsaved packet notes",
+            "Packet notes have changed since they were last saved. Save them before continuing?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if choice == QMessageBox.StandardButton.Save:
+            return self.save_packet_notes()
+        if choice == QMessageBox.StandardButton.Discard:
+            self._annotations_dirty = False
+            return True
+        return False
 
     def show_tcp_flow_graph(self) -> None:
         if self._flow_worker is not None and self._flow_worker.isRunning():
@@ -1522,6 +1558,10 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def closeEvent(self, event) -> None:
+        if not self._close_pending and not self._confirm_unsaved_annotations():
+            event.ignore()
+            return
+
         if not self._close_pending:
             self._close_pending = True
             workers = tuple(
