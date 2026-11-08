@@ -163,6 +163,11 @@ class MainWindow(QMainWindow):
         self.start_capture_action.triggered.connect(self.start_live_capture)
         capture_menu.addAction(self.start_capture_action)
 
+        self.pause_capture_action = QAction("Pause live capture", self)
+        self.pause_capture_action.setShortcut(QKeySequence("Ctrl+P"))
+        self.pause_capture_action.triggered.connect(self.toggle_live_capture_pause)
+        capture_menu.addAction(self.pause_capture_action)
+
         self.stop_capture_action = QAction("Stop live capture", self)
         self.stop_capture_action.triggered.connect(self.stop_live_capture)
         capture_menu.addAction(self.stop_capture_action)
@@ -237,6 +242,13 @@ class MainWindow(QMainWindow):
         )
         self.start_capture_button.clicked.connect(self.start_live_capture)
         side.addWidget(self.start_capture_button)
+
+        self.pause_capture_button = QPushButton("Ⅱ  Pause capture")
+        self.pause_capture_button.setToolTip(
+            "Temporarily pause packet collection without ending this capture session (Ctrl+P)."
+        )
+        self.pause_capture_button.clicked.connect(self.toggle_live_capture_pause)
+        side.addWidget(self.pause_capture_button)
 
         self.stop_capture_button = QPushButton("■  Stop capture")
         self.stop_capture_button.clicked.connect(self.stop_live_capture)
@@ -466,8 +478,16 @@ class MainWindow(QMainWindow):
         self.interface_combo.setEnabled(idle)
         self.refresh_interfaces_button.setEnabled(idle)
         self.start_capture_button.setEnabled(idle and has_interfaces)
+        worker_can_pause = self._live_worker is not None and self._live_worker.can_pause
+        paused = self._live_worker.is_paused if self._live_worker is not None else False
+        pause_label = "▶  Resume capture" if paused else "Ⅱ  Pause capture"
+        self.pause_capture_button.setText(pause_label)
+        self.pause_capture_action.setText("Resume live capture" if paused else "Pause live capture")
+        self.pause_capture_button.setEnabled(worker_can_pause)
+        self.pause_capture_action.setEnabled(worker_can_pause)
         self.stop_capture_button.setEnabled(capturing)
         self.start_capture_action.setEnabled(idle and has_interfaces)
+        self.pause_capture_action.setEnabled(worker_can_pause)
         self.stop_capture_action.setEnabled(capturing)
         self.open_action.setEnabled(idle)
         self.close_action.setEnabled(idle and self.model.total_count > 0)
@@ -533,6 +553,8 @@ class MainWindow(QMainWindow):
         self._live_worker = LiveCaptureWorker(interface, self)
         self._live_worker.batch_ready.connect(self._on_live_packet_batch)
         self._live_worker.capture_failed.connect(self._on_live_capture_failed)
+        self._live_worker.capture_started.connect(self._on_live_capture_started)
+        self._live_worker.paused_changed.connect(self._on_live_capture_state_changed)
         self._live_worker.finished.connect(self._on_live_capture_finished)
         self._live_worker.finished.connect(self._live_worker.deleteLater)
 
@@ -541,11 +563,52 @@ class MainWindow(QMainWindow):
         self._live_worker.start()
         self._update_capture_controls()
 
+    def toggle_live_capture_pause(self) -> None:
+        worker = self._live_worker
+        if worker is None or not worker.can_pause:
+            return
+        try:
+            if worker.is_paused:
+                worker.resume()
+            else:
+                worker.pause()
+        except LiveCaptureError as exc:
+            QMessageBox.warning(self, "Live capture control failed", str(exc))
+            self._update_capture_controls()
+
+    def _on_live_capture_started(self) -> None:
+        interface = self._live_interface or "interface"
+        self.capture_state_label.setText(
+            f"Capturing on {interface} · promiscuous mode off"
+        )
+        self.statusBar().showMessage(f"Capturing on {interface}…")
+        self._update_capture_controls()
+
+    def _on_live_capture_state_changed(self, paused: bool) -> None:
+        interface = self._live_interface or "interface"
+        if paused:
+            self.capture_state_label.setText(
+                f"Paused on {interface}\n{self.model.total_count:,} packets retained"
+            )
+            self.statusBar().showMessage(
+                f"Capture paused on {interface} · {self.model.total_count:,} packets retained"
+            )
+        else:
+            self.capture_state_label.setText(
+                f"Capturing on {interface} · promiscuous mode off"
+            )
+            self.statusBar().showMessage(
+                f"Capture resumed on {interface} · {self.model.total_count:,} packets"
+            )
+        self._update_capture_controls()
+
     def stop_live_capture(self) -> None:
         if self._live_worker is None or not self._live_worker.isRunning():
             return
 
         self.stop_capture_button.setEnabled(False)
+        self.pause_capture_button.setEnabled(False)
+        self.pause_capture_action.setEnabled(False)
         self.stop_capture_action.setEnabled(False)
         self.capture_state_label.setText("Stopping live capture…")
         self.statusBar().showMessage("Stopping live capture…")
@@ -555,8 +618,10 @@ class MainWindow(QMainWindow):
         self.model.append_packets(packets)
         self._update_counts()
         interface = self._live_interface or "interface"
+        paused = self._live_worker is not None and self._live_worker.is_paused
+        state = "Paused" if paused else "Capturing"
         self.statusBar().showMessage(
-            f"Capturing on {interface} · {self.model.total_count:,} packets"
+            f"{state} on {interface} · {self.model.total_count:,} packets"
         )
 
     def _on_live_capture_failed(self, message: str) -> None:
