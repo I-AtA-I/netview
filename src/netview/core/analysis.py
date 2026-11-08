@@ -174,12 +174,16 @@ def _tcp_diagnostics(packets: list[ProcessedPacket]) -> tuple[TCPDiagnostic, ...
             highest_start = state["highest_start"]
             highest_end = state["highest_end"]
 
-            if highest_start is not None and relative_start < highest_start:
-                category = (
-                    "Possible retransmission / overlap"
-                    if highest_end is not None and relative_start < highest_end
-                    else "Out-of-order segment"
-                )
+            if highest_end is not None and relative_start < highest_end:
+                if highest_start is not None and relative_end <= highest_start:
+                    category = "Out-of-order segment"
+                else:
+                    category = "Possible retransmission / overlap"
+            elif highest_start is not None and relative_start < highest_start:
+                category = "Out-of-order segment"
+            else:
+                category = ""
+            if category:
                 diagnostics.append(
                     TCPDiagnostic(
                         packet_number=packet.number,
