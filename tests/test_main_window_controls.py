@@ -48,6 +48,12 @@ class RunningWorker:
     def isRunning(self):
         return True
 
+    def stop(self):
+        pass
+
+    def wait(self):
+        return True
+
 
 def test_packet_tools_remain_available_while_capture_worker_stops(qtbot, monkeypatch):
     monkeypatch.setattr("netview.gui.main_window.list_interfaces", lambda: ["lo"])
