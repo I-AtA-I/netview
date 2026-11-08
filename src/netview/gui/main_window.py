@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -42,6 +43,7 @@ QMainWindow, QWidget {
     font-family: "Inter", "Noto Sans", sans-serif;
     font-size: 10pt;
 }
+QFrame#sidebar { background: #14212a; border-right: 1px solid #293943; }
 QMenuBar, QMenu {
     background: #14212a;
     color: #dce7ec;
@@ -170,64 +172,106 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         central = QWidget(self)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(12, 10, 12, 10)
-        root.setSpacing(9)
+        shell = QHBoxLayout(central)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
+
+        sidebar = QFrame()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(248)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(20, 22, 20, 20)
+        side.setSpacing(12)
+
+        brand = QLabel("netview")
+        brand.setStyleSheet("font-size: 23pt; font-weight: 800; color: #edf7f8; letter-spacing: -1px;")
+        tagline = QLabel("NETWORK OBSERVABILITY")
+        tagline.setStyleSheet("font-size: 8pt; font-weight: 700; letter-spacing: 2px; color: #72e0d0;")
+        side.addWidget(brand)
+        side.addWidget(tagline)
+        side.addSpacing(24)
+
+        section = QLabel("CAPTURE SOURCE")
+        section.setStyleSheet("font-size: 8pt; font-weight: 700; letter-spacing: 1px; color: #8297a4;")
+        side.addWidget(section)
+
+        self.interface_combo = QComboBox()
+        self.interface_combo.setMinimumWidth(190)
+        self.interface_combo.setToolTip(
+            "Select one local interface you own or are authorized to monitor."
+        )
+        side.addWidget(self.interface_combo)
+
+        self.refresh_interfaces_button = QPushButton("↻  Refresh interfaces")
+        self.refresh_interfaces_button.clicked.connect(self.refresh_interfaces)
+        side.addWidget(self.refresh_interfaces_button)
+
+        self.start_capture_button = QPushButton("▶  Start live capture")
+        self.start_capture_button.setStyleSheet(
+            "QPushButton { background: #1d514d; border-color: #347f76; color: #eafffb; }"
+            "QPushButton:hover { background: #27665f; }"
+        )
+        self.start_capture_button.clicked.connect(self.start_live_capture)
+        side.addWidget(self.start_capture_button)
+
+        self.stop_capture_button = QPushButton("■  Stop capture")
+        self.stop_capture_button.clicked.connect(self.stop_live_capture)
+        side.addWidget(self.stop_capture_button)
+
+        side.addSpacing(16)
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet("color: #293943;")
+        side.addWidget(divider)
+
+        section = QLabel("SESSION STATUS")
+        section.setStyleSheet("font-size: 8pt; font-weight: 700; letter-spacing: 1px; color: #8297a4;")
+        side.addWidget(section)
+        self.capture_state_label = QLabel("Live capture stopped\nPromiscuous mode off")
+        self.capture_state_label.setWordWrap(True)
+        self.capture_state_label.setStyleSheet(
+            "background: #17252e; border: 1px solid #293943; border-radius: 8px;"
+            "padding: 12px; color: #9eb2bd; font-size: 9pt;"
+        )
+        side.addWidget(self.capture_state_label)
+        side.addStretch(1)
+
+        footer = QLabel("NETVIEW 1.0  ·  PACKET ANALYSIS")
+        footer.setStyleSheet("font-size: 7pt; color: #607580; letter-spacing: 1px;")
+        side.addWidget(footer)
+        shell.addWidget(sidebar)
+
+        content = QWidget()
+        root = QVBoxLayout(content)
+        root.setContentsMargins(24, 20, 24, 18)
+        root.setSpacing(12)
 
         heading = QHBoxLayout()
-        title = QLabel("NetView")
-        title.setStyleSheet("font-size: 18pt; font-weight: 700; color: #f0f8fa;")
-        subtitle = QLabel("NETWORK PROTOCOL ANALYZER")
-        subtitle.setStyleSheet("font-size: 8pt; letter-spacing: 1px; color: #91a5b2;")
+        heading.setSpacing(12)
+        title = QLabel("Packet workspace")
+        title.setStyleSheet("font-size: 20pt; font-weight: 750; color: #edf7f8;")
         heading.addWidget(title)
-        heading.addSpacing(10)
-        heading.addWidget(subtitle)
         heading.addStretch(1)
-
         self.file_label = QLabel("No capture loaded")
         self.file_label.setStyleSheet("color: #9eb2bd;")
         self.file_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         heading.addWidget(self.file_label)
         root.addLayout(heading)
 
-        capture_row = QHBoxLayout()
-        capture_row.setSpacing(8)
-        capture_label = QLabel("Interface")
-        capture_label.setStyleSheet("color: #a9bac3; font-weight: 600;")
-        self.interface_combo = QComboBox()
-        self.interface_combo.setMinimumWidth(220)
-        self.interface_combo.setToolTip(
-            "Select one local interface you own or are authorized to monitor."
-        )
-        self.refresh_interfaces_button = QPushButton("Refresh")
-        self.refresh_interfaces_button.clicked.connect(self.refresh_interfaces)
-        self.start_capture_button = QPushButton("Start capture")
-        self.start_capture_button.clicked.connect(self.start_live_capture)
-        self.stop_capture_button = QPushButton("Stop")
-        self.stop_capture_button.clicked.connect(self.stop_live_capture)
-        self.capture_state_label = QLabel("Live capture stopped · promiscuous mode off")
-        self.capture_state_label.setStyleSheet("color: #8297a4; font-size: 9pt;")
-        capture_row.addWidget(capture_label)
-        capture_row.addWidget(self.interface_combo)
-        capture_row.addWidget(self.refresh_interfaces_button)
-        capture_row.addWidget(self.start_capture_button)
-        capture_row.addWidget(self.stop_capture_button)
-        capture_row.addWidget(self.capture_state_label, 1)
-        root.addLayout(capture_row)
-
         filter_row = QHBoxLayout()
-        filter_label = QLabel("Display filter")
-        filter_label.setStyleSheet("color: #a9bac3; font-weight: 600;")
+        filter_row.setSpacing(8)
+        filter_label = QLabel("FILTER")
+        filter_label.setStyleSheet("color: #72e0d0; font-size: 8pt; font-weight: 700; letter-spacing: 1px;")
         self.filter_input = QLineEdit()
         self.filter_input.setPlaceholderText(
-            "e.g. tcp.port == 443 or dns.qry.name == example.com"
+            "tcp.port == 443   ·   dns.qry.name == example.com   ·   tls"
         )
         self.filter_input.returnPressed.connect(self.apply_filter)
-        self.apply_button = QPushButton("Apply")
+        self.apply_button = QPushButton("Apply filter")
         self.apply_button.clicked.connect(self.apply_filter)
-        self.clear_filter_button = QPushButton("Clear")
+        self.clear_filter_button = QPushButton("Reset")
         self.clear_filter_button.clicked.connect(self.clear_filter)
-        self.follow_stream_button = QPushButton("Follow TCP Stream")
+        self.follow_stream_button = QPushButton("Follow TCP stream")
         self.follow_stream_button.setToolTip(
             "Reassemble both directions of the selected IPv4/TCP conversation (Ctrl+Shift+T)."
         )
@@ -240,7 +284,9 @@ class MainWindow(QMainWindow):
         filter_row.addWidget(self.follow_stream_button)
         root.addLayout(filter_row)
 
-        self.filter_status = QLabel("Filters: dns, http, tls, arp, ipv6, tcp, udp, icmp, app metadata, addresses, ports")
+        self.filter_status = QLabel(
+            "Filter by protocol, addresses, ports, DNS, HTTP or TLS metadata"
+        )
         self.filter_status.setStyleSheet("color: #8297a4; font-size: 9pt;")
         root.addWidget(self.filter_status)
 
@@ -253,18 +299,18 @@ class MainWindow(QMainWindow):
         self.packet_table.setSortingEnabled(False)
         self.packet_table.verticalHeader().setVisible(False)
         self.packet_table.horizontalHeader().setStretchLastSection(True)
-        self.packet_table.setColumnWidth(0, 70)
+        self.packet_table.setColumnWidth(0, 64)
         self.packet_table.setColumnWidth(1, 145)
-        self.packet_table.setColumnWidth(2, 170)
-        self.packet_table.setColumnWidth(3, 170)
-        self.packet_table.setColumnWidth(4, 100)
-        self.packet_table.setColumnWidth(5, 85)
+        self.packet_table.setColumnWidth(2, 155)
+        self.packet_table.setColumnWidth(3, 155)
+        self.packet_table.setColumnWidth(4, 95)
+        self.packet_table.setColumnWidth(5, 78)
         self.packet_table.selectionModel().selectionChanged.connect(
             self._on_selection_changed
         )
 
         self.details_tree = QTreeWidget()
-        self.details_tree.setHeaderLabels(["Packet details", "Value"])
+        self.details_tree.setHeaderLabels(["Decoded layer", "Field value"])
         self.details_tree.setColumnWidth(0, 255)
         self.details_tree.setAlternatingRowColors(True)
 
@@ -288,6 +334,7 @@ class MainWindow(QMainWindow):
         main_splitter.setSizes([540, 300])
         root.addWidget(main_splitter, 1)
 
+        shell.addWidget(content, 1)
         self.setCentralWidget(central)
         self.count_status = QLabel("0 displayed / 0 total")
         self.count_status.setStyleSheet("color: #9eb2bd; padding: 0 8px;")
