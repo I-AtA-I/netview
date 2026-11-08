@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from netview.filters import FilterSyntaxError, compile_filter
-from .saved_filters import load_saved_filters, save_saved_filters
+from netview.filters.saved_filters import load_saved_filters, save_saved_filters
 
 
 class FilterManagerDialog(QDialog):
@@ -66,10 +66,13 @@ class FilterManagerDialog(QDialog):
         root.addWidget(self.status_label)
 
         edit_row = QHBoxLayout()
+        self.new_button = QPushButton("New filter")
+        self.new_button.clicked.connect(self.new_filter)
         self.save_button = QPushButton("Save / update")
         self.save_button.clicked.connect(self.save_filter)
         self.remove_button = QPushButton("Remove")
         self.remove_button.clicked.connect(self.remove_filter)
+        edit_row.addWidget(self.new_button)
         edit_row.addWidget(self.save_button)
         edit_row.addWidget(self.remove_button)
         edit_row.addStretch(1)
@@ -91,6 +94,13 @@ class FilterManagerDialog(QDialog):
         if self._load_error:
             self.status_label.setText(self._load_error)
             self.status_label.setStyleSheet("color: #e18b91;")
+            self.save_button.setEnabled(False)
+
+    def new_filter(self) -> None:
+        self.filter_list.setCurrentRow(-1)
+        self.name_input.clear()
+        self.status_label.clear()
+        self.status_label.setStyleSheet("color: #91a5b2;")
 
     def _refresh_list(self, selected_row: int = -1) -> None:
         self.filter_list.blockSignals(True)
