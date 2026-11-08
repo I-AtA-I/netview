@@ -1,3 +1,5 @@
+from ipaddress import IPv6Address
+
 from netview.core import PacketRecord, process_packet
 from netview.core.streams import build_tcp_streams, tcp_stream_key_for_packet
 
@@ -52,6 +54,45 @@ def make_tcp_packet(
     return process_packet(record)
 
 
+def make_ipv6_tcp_packet(
+    number,
+    *,
+    source="2001:db8::1",
+    destination="2001:db8::2",
+    source_port=50000,
+    destination_port=80,
+    sequence=100,
+    flags=0x18,
+    payload=b"",
+    timestamp=None,
+):
+    tcp = bytearray(20)
+    tcp[0:2] = source_port.to_bytes(2, "big")
+    tcp[2:4] = destination_port.to_bytes(2, "big")
+    tcp[4:8] = sequence.to_bytes(4, "big")
+    tcp[12] = 0x50
+    tcp[13] = flags
+
+    ip = bytearray(40)
+    ip[0] = 0x60
+    ip[4:6] = (len(tcp) + len(payload)).to_bytes(2, "big")
+    ip[6] = 6
+    ip[7] = 64
+    ip[8:24] = IPv6Address(source).packed
+    ip[24:40] = IPv6Address(destination).packed
+
+    frame = MAC_DST + MAC_SRC + b"\x86\xdd" + bytes(ip) + bytes(tcp) + payload
+    record = PacketRecord(
+        number=number,
+        timestamp=timestamp,
+        captured_length=len(frame),
+        original_length=len(frame),
+        link_type=1,
+        data=frame,
+    )
+    return process_packet(record)
+
+
 def test_reassemble_bidirectional_stream():
     packets = [
         make_tcp_packet(1, sequence=100, payload=b"hello"),
@@ -59,6 +100,30 @@ def test_reassemble_bidirectional_stream():
             2,
             source="10.0.0.2",
             destination="10.0.0.1",
+            source_port=80,
+            destination_port=50000,
+            sequence=900,
+            payload=b"world",
+        ),
+    ]
+
+    streams = build_tcp_streams(packets)
+
+    assert len(streams) == 1
+    stream = streams[0]
+    assert stream.packet_count == 2
+    assert stream.directions[0].chunks[0].data == b"hello"
+    assert stream.directions[1].chunks[0].data == b"world"
+    assert stream.payload_length == 10
+
+
+def test_reassemble_bidirectional_ipv6_stream():
+    packets = [
+        make_ipv6_tcp_packet(1, sequence=100, payload=b"hello"),
+        make_ipv6_tcp_packet(
+            2,
+            source="2001:db8::2",
+            destination="2001:db8::1",
             source_port=80,
             destination_port=50000,
             sequence=900,
@@ -261,6 +326,27 @@ def test_selected_stream_keeps_global_stream_id():
 
     assert stream is not None
     assert stream.stream_id == 1
+
+
+
+def test_selected_stream_can_be_cancelled_during_packet_scan():
+    from netview.core.streams import build_tcp_stream
+
+    first = make_tcp_packet(1, sequence=100, payload=b"one")
+    second = make_tcp_packet(2, sequence=103, payload=b"two")
+    key, _ = tcp_stream_key_for_packet(first)
+    checks = 0
+
+    def should_stop():
+        nonlocal checks
+        checks += 1
+        return checks == 2
+
+    assert build_tcp_stream(
+        [first, second],
+        key,
+        should_stop=should_stop,
+    ) is None
 
 
 def test_ip_fragment_is_excluded_until_ip_reassembly_exists():

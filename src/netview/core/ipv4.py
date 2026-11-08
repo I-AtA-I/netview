@@ -88,7 +88,8 @@ def parse_ipv4_packet(data: bytes) -> IPv4Header:
         reserved_flag=bool(flags_fragment & 0x8000),
         dont_fragment=bool(flags_fragment & 0x4000),
         more_fragments=bool(flags_fragment & 0x2000),
-        fragment_offset=flags_fragment & 0x1FFF,
+        # Keep IPv4 and IPv6 fragment offsets in the same units (bytes).
+        fragment_offset=(flags_fragment & 0x1FFF) * 8,
         ttl=data[8],
         protocol=data[9],
         header_checksum=int.from_bytes(data[10:12], "big"),

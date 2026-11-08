@@ -1,7 +1,7 @@
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from ipaddress import IPv4Address
+from ipaddress import IPv4Address, IPv6Address
 
 from netview.core.pipeline import ProcessedPacket
 
@@ -10,7 +10,7 @@ class FilterSyntaxError(ValueError):
     pass
 
 
-_TOKEN_RE = re.compile(r"\s*(==|!=|>=|<=|[()<>]|[^\s()=!<>]+)")
+_TOKEN_RE = re.compile(r'\s*(==|!=|>=|<=|[()]|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[<>]|[^\s()=!<>]+)')
 _MAC_RE = re.compile(r"^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
 
 _OPERATORS = {"==", "!=", ">", ">=", "<", "<="}
@@ -25,6 +25,14 @@ _PROTOCOLS = {
     "icmp",
     "vlan",
     "fragment",
+    "arp",
+    "ipv6",
+    "icmpv6",
+    "dns",
+    "mdns",
+    "llmnr",
+    "http",
+    "tls",
 }
 
 _FIELD_KINDS = {
@@ -35,6 +43,33 @@ _FIELD_KINDS = {
     "ip.dst": "ip",
     "ip.ttl": "number",
     "ip.proto": "number",
+    "ipv6.src": "ipv6",
+    "ipv6.dst": "ipv6",
+    "ipv6.hlim": "number",
+    "ipv6.nxt": "number",
+    "arp.opcode": "number",
+    "arp.hw.type": "number",
+    "arp.proto.type": "number",
+    "arp.src.hw_mac": "mac",
+    "arp.dst.hw_mac": "mac",
+    "arp.src.proto_ipv4": "ip",
+    "arp.dst.proto_ipv4": "ip",
+    "icmp.type": "number",
+    "icmp.code": "number",
+    "icmpv6.type": "number",
+    "icmpv6.code": "number",
+    "dns.qry.type": "number",
+    "dns.rcode": "number",
+    "dns.flags.response": "bool",
+    "dns.qry.name": "string",
+    "http.host": "string",
+    "http.request.method": "string",
+    "http.request.uri": "string",
+    "http.response.code": "number",
+    "tls.sni": "string",
+    "tls.handshake.type": "number",
+    "tls.record.version": "number",
+    "tls.record.content_type": "number",
     "eth.src": "mac",
     "eth.dst": "mac",
     "tcp.srcport": "number",
@@ -119,6 +154,21 @@ def _parse_value(field: str, raw_value: str):
             "frame.cap_len": (0, None),
             "ip.ttl": (0, 255),
             "ip.proto": (0, 255),
+            "ipv6.hlim": (0, 255),
+            "ipv6.nxt": (0, 255),
+            "arp.opcode": (0, 65535),
+            "arp.hw.type": (0, 65535),
+            "arp.proto.type": (0, 65535),
+            "icmp.type": (0, 255),
+            "icmp.code": (0, 255),
+            "icmpv6.type": (0, 255),
+            "icmpv6.code": (0, 255),
+            "dns.qry.type": (0, 65535),
+            "dns.rcode": (0, 15),
+            "http.response.code": (100, 599),
+            "tls.handshake.type": (0, 255),
+            "tls.record.version": (0, 65535),
+            "tls.record.content_type": (0, 255),
             "tcp.srcport": (0, 65535),
             "tcp.dstport": (0, 65535),
             "tcp.port": (0, 65535),
@@ -144,6 +194,14 @@ def _parse_value(field: str, raw_value: str):
                 f"Invalid IPv4 address: {raw_value}"
             ) from exc
 
+    if kind == "ipv6":
+        try:
+            return str(IPv6Address(raw_value))
+        except ValueError as exc:
+            raise FilterSyntaxError(
+                f"Invalid IPv6 address: {raw_value}"
+            ) from exc
+
     if kind == "mac":
         if not _MAC_RE.fullmatch(raw_value):
             raise FilterSyntaxError(
@@ -151,6 +209,16 @@ def _parse_value(field: str, raw_value: str):
             )
 
         return raw_value.lower()
+
+    if kind == "string":
+        if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] and raw_value[0] in {"\"", "'"}:
+            quote = raw_value[0]
+            value = raw_value[1:-1].replace("\\" + quote, quote).replace("\\\\", "\\")
+        else:
+            value = raw_value
+        if not value:
+            raise FilterSyntaxError("String filter value cannot be empty")
+        return value
 
     if kind == "bool":
         value = raw_value.lower()
@@ -249,7 +317,7 @@ class _Parser:
 
             kind = _FIELD_KINDS[name]
 
-            if kind in {"ip", "mac", "bool"} and operator not in {"==", "!="}:
+            if kind in {"ip", "ipv6", "mac", "bool", "string"} and operator not in {"==", "!="}:
                 raise FilterSyntaxError(
                     f"Operator {operator} is not supported for {name}"
                 )
@@ -310,6 +378,81 @@ def _field_value(field: str, packet: ProcessedPacket):
     if field == "ip.proto":
         return dissection.ipv4.protocol if dissection.ipv4 else None
 
+    if field == "ipv6.src":
+        return dissection.ipv6.source_ip if dissection.ipv6 else None
+
+    if field == "ipv6.dst":
+        return dissection.ipv6.destination_ip if dissection.ipv6 else None
+
+    if field == "ipv6.hlim":
+        return dissection.ipv6.hop_limit if dissection.ipv6 else None
+
+    if field == "ipv6.nxt":
+        return dissection.ipv6.upper_layer_protocol if dissection.ipv6 else None
+
+    if field == "arp.opcode":
+        return dissection.arp.opcode if dissection.arp else None
+
+    if field == "arp.hw.type":
+        return dissection.arp.hardware_type if dissection.arp else None
+
+    if field == "arp.proto.type":
+        return dissection.arp.protocol_type if dissection.arp else None
+
+    if field == "arp.src.hw_mac":
+        return dissection.arp.sender_hardware_address if dissection.arp else None
+
+    if field == "arp.dst.hw_mac":
+        return dissection.arp.target_hardware_address if dissection.arp else None
+
+    if field == "arp.src.proto_ipv4":
+        return dissection.arp.sender_protocol_address if dissection.arp else None
+
+    if field == "arp.dst.proto_ipv4":
+        return dissection.arp.target_protocol_address if dissection.arp else None
+
+    if field == "icmp.type":
+        return dissection.icmp.type if dissection.icmp and dissection.icmp.version == 4 else None
+
+    if field == "icmp.code":
+        return dissection.icmp.code if dissection.icmp and dissection.icmp.version == 4 else None
+
+    if field == "icmpv6.type":
+        return dissection.icmp.type if dissection.icmp and dissection.icmp.version == 6 else None
+
+    if field == "icmpv6.code":
+        return dissection.icmp.code if dissection.icmp and dissection.icmp.version == 6 else None
+
+    dns = dissection.dns
+    if field == "dns.qry.name":
+        return dns.query_name if dns else None
+    if field == "dns.qry.type":
+        return dns.questions[0].qtype if dns and dns.questions else None
+    if field == "dns.flags.response":
+        return dns.is_response if dns else None
+    if field == "dns.rcode":
+        return dns.rcode if dns else None
+
+    http = dissection.http
+    if field == "http.host":
+        return http.host if http else None
+    if field == "http.request.method":
+        return http.method if http else None
+    if field == "http.request.uri":
+        return http.target if http else None
+    if field == "http.response.code":
+        return http.status_code if http else None
+
+    tls = dissection.tls
+    if field == "tls.sni":
+        return tls.client_hello.server_name if tls and tls.client_hello else None
+    if field == "tls.handshake.type":
+        return tls.handshake_type if tls else None
+    if field == "tls.record.version":
+        return tls.legacy_version if tls else None
+    if field == "tls.record.content_type":
+        return tls.content_type if tls else None
+
     if field == "eth.src":
         return dissection.ethernet.source_mac if dissection.ethernet else None
 
@@ -356,6 +499,10 @@ def _field_value(field: str, packet: ProcessedPacket):
 
 
 def _compare(actual, operator: str, expected) -> bool:
+    if isinstance(actual, str) and isinstance(expected, str):
+        actual = actual.casefold()
+        expected = expected.casefold()
+
     if operator == "==":
         return actual == expected
     if operator == "!=":
@@ -381,6 +528,12 @@ def _protocol_matches(name: str, packet: ProcessedPacket) -> bool:
     if name in {"ip", "ipv4"}:
         return dissection.ipv4 is not None
 
+    if name == "ipv6":
+        return dissection.ipv6 is not None
+
+    if name == "arp":
+        return dissection.arp is not None
+
     if name == "tcp":
         return dissection.tcp is not None
 
@@ -388,10 +541,25 @@ def _protocol_matches(name: str, packet: ProcessedPacket) -> bool:
         return dissection.udp is not None
 
     if name == "icmp":
-        return (
-            dissection.ipv4 is not None
-            and dissection.ipv4.protocol == 1
-        )
+        return dissection.icmp is not None and dissection.icmp.version == 4
+
+    if name == "icmpv6":
+        return dissection.icmp is not None and dissection.icmp.version == 6
+
+    if name in {"dns", "mdns", "llmnr"}:
+        if dissection.dns is None:
+            return False
+        if name == "mdns":
+            return dissection.protocol == "mDNS"
+        if name == "llmnr":
+            return dissection.protocol == "LLMNR"
+        return True
+
+    if name == "http":
+        return dissection.http is not None
+
+    if name == "tls":
+        return dissection.tls is not None
 
     if name == "vlan":
         return (
@@ -401,8 +569,8 @@ def _protocol_matches(name: str, packet: ProcessedPacket) -> bool:
 
     if name == "fragment":
         return (
-            dissection.ipv4 is not None
-            and dissection.ipv4.is_fragment
+            (dissection.ipv4 is not None and dissection.ipv4.is_fragment)
+            or (dissection.ipv6 is not None and dissection.ipv6.is_fragment)
         )
 
     return False

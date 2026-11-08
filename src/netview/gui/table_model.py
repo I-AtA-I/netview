@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtGui import QColor, QFont
 
 from netview.core.pipeline import ProcessedPacket
 from netview.filters import CompiledFilter, compile_filter
@@ -22,6 +23,7 @@ class PacketTableModel(QAbstractTableModel):
         self._packets: list[ProcessedPacket] = []
         self._visible: list[ProcessedPacket] = []
         self._filter: CompiledFilter | None = None
+        self._annotations: dict[int, str] = {}
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         if parent.isValid():
@@ -59,18 +61,41 @@ class PacketTableModel(QAbstractTableModel):
                 packet.destination,
                 packet.protocol,
                 packet.length,
-                packet.info,
+                packet.info + ("   ★" if packet.number in self._annotations else ""),
             )
             if 0 <= index.column() < len(values):
                 return str(values[index.column()])
 
+        if role == Qt.ItemDataRole.ForegroundRole and index.column() == 4:
+            colors = {
+                "TCP": "#72c8e8",
+                "UDP": "#72e0d0",
+                "DNS": "#c6a6f2",
+                "mDNS": "#c6a6f2",
+                "LLMNR": "#c6a6f2",
+                "HTTP": "#e8bd75",
+                "TLS": "#8fb8ff",
+                "ARP": "#d7a7e8",
+                "ICMP": "#e59b86",
+                "ICMPv6": "#e59b86",
+                "IPv6": "#80c9c0",
+            }
+            return QColor("#e58d91" if packet.dissection.errors else colors.get(packet.protocol, "#a9bac3"))
+
+        if role == Qt.ItemDataRole.FontRole and index.column() == 4:
+            font = QFont()
+            font.setWeight(QFont.Weight.DemiBold)
+            return font
+
         if role == Qt.ItemDataRole.ToolTipRole:
-            return (
+            note = self._annotations.get(packet.number)
+            tooltip = (
                 f"Packet {packet.number}\n"
                 f"Captured: {packet.captured_length} bytes\n"
                 f"Original: {packet.length} bytes\n"
                 f"Link type: {packet.record.link_type}"
             )
+            return f"{tooltip}\n\nNote: {note}" if note else tooltip
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
             if index.column() in (0, 5):
@@ -134,6 +159,24 @@ class PacketTableModel(QAbstractTableModel):
     def iter_packets(self):
         """Iterate over all captured packets, regardless of display filter."""
         return iter(self._packets)
+
+    def set_annotations(self, annotations: dict[int, str]) -> None:
+        self._annotations = dict(annotations)
+        if self._visible:
+            self.dataChanged.emit(
+                self.index(0, 6),
+                self.index(len(self._visible) - 1, 6),
+                [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole],
+            )
+
+    def annotation_for(self, packet_number: int) -> str | None:
+        return self._annotations.get(packet_number)
+
+    def row_for_packet_number(self, packet_number: int) -> int:
+        for row, packet in enumerate(self._visible):
+            if packet.number == packet_number:
+                return row
+        return -1
 
     @property
     def total_count(self) -> int:

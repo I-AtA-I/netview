@@ -107,12 +107,12 @@ def test_dissect_udp_packet():
 def test_dissect_unknown_ethertype():
     frame = make_ethernet_frame(
         b"\x01\x02\x03\x04",
-        ether_type=0x86DD,
+        ether_type=0x88B5,
     )
 
     result = dissect_ethernet_frame(frame)
 
-    assert result.protocol == "EtherType 0x86dd"
+    assert result.protocol == "EtherType 0x88b5"
     assert result.ethernet is not None
     assert result.ipv4 is None
     assert result.payload == b"\x01\x02\x03\x04"

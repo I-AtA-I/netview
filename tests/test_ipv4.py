@@ -79,7 +79,7 @@ def test_parse_fragment_flags():
 
     assert header.dont_fragment is True
     assert header.more_fragments is True
-    assert header.fragment_offset == 3
+    assert header.fragment_offset == 24
     assert header.is_fragment is True
 
 
