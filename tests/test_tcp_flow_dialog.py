@@ -15,5 +15,6 @@ def test_tcp_flow_graph_dialog_displays_capture_summary(qtbot):
 
     assert dialog.canvas.graph is graph
     assert dialog.canvas.minimumSizeHint().height() > 200
-    assert "2 packets" in dialog.findChild(type(dialog.layout().itemAt(1).widget())).text() if False else True
+    assert "2 packets" in dialog.summary_label.text()
+    assert "0 possible overlap(s)" in dialog.summary_label.text()
     dialog.close()
