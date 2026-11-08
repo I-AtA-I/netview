@@ -32,6 +32,9 @@ class TCPFlowGraphCanvas(QWidget):
             self.TOP_MARGIN + len(self.graph.events) * self.ROW_HEIGHT + self.BOTTOM_MARGIN,
         )
 
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -164,11 +167,12 @@ class TCPFlowGraphDialog(QDialog):
             if graph.duration_seconds is not None
             else "timestamps unavailable"
         )
-        summary = QLabel(
+        self.summary_label = QLabel(
             f"{graph.key.endpoint_a}  ↔  {graph.key.endpoint_b}\n"
             f"{graph.packet_count:,} packets  ·  {duration}  ·  "
             f"{graph.overlap_count:,} possible overlap(s)"
         )
+        summary = self.summary_label
         summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         summary.setStyleSheet(
             "background: #17252e; border: 1px solid #293943; border-radius: 8px;"
