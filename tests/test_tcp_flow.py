@@ -1,3 +1,5 @@
+import pytest
+
 from ipaddress import IPv6Address
 
 from netview.core import PacketRecord, process_packet
@@ -94,7 +96,7 @@ def test_flow_graph_tracks_bidirectional_packets_and_time():
 
     assert graph is not None
     assert graph.packet_count == 3
-    assert graph.duration_seconds == 0.02
+    assert graph.duration_seconds == pytest.approx(0.02)
     assert [event.direction for event in graph.events] == [0, 1, 0]
     assert graph.events[1].acknowledgment_number == 101
     assert graph.events[2].sequence_offset == 0
