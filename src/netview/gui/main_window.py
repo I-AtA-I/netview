@@ -36,7 +36,6 @@ from .annotations import annotation_sidecar_path, load_annotations, save_annotat
 from .live_worker import LiveCaptureWorker
 from .stream_dialog import TCPStreamDialog
 from .stream_worker import TCPStreamWorker
-from .statistics_dialog import StatisticsDialog
 from .worker import CaptureLoadWorker
 
 
