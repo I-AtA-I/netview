@@ -1,0 +1,36 @@
+# Maintainer: I-AtA-I <maintainer email to be added>
+
+pkgname=netview
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Desktop network protocol analyzer"
+arch=('any')
+url="https://github.com/I-AtA-I/netview"
+license=('MIT')
+depends=(
+  'python>=3.10'
+  'pyside6>=6.12'
+  'python-scapy>=2.8'
+)
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+)
+optdepends=(
+  'wireshark-cli: live packet capture through dumpcap'
+)
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/I-AtA-I/netview/releases/download/v${pkgver}/netview-${pkgver}.tar.gz")
+sha256sums=('f60565a5bd963eddf6445b279b67e9266ac3331b60a8e66ce4ca5a29cd22211b')
+
+build() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+
+  python -m installer --destdir="${pkgdir}" dist/*.whl
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}
