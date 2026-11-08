@@ -164,6 +164,15 @@ def _tcp_diagnostics(packets: list[ProcessedPacket]) -> tuple[TCPDiagnostic, ...
         payload = packet.dissection.payload
 
         if payload:
+            ip_is_truncated = (
+                packet.dissection.ipv4.is_truncated
+                if packet.dissection.ipv4 is not None
+                else packet.dissection.ipv6.is_truncated
+                if packet.dissection.ipv6 is not None
+                else False
+            )
+            if ip_is_truncated or packet.record.original_length > packet.record.captured_length:
+                continue
             data_sequence = (tcp.sequence_number + int(tcp.is_syn)) & 0xFFFFFFFF
             if state["base_sequence"] is None:
                 state["base_sequence"] = data_sequence
@@ -333,8 +342,10 @@ def analyze_capture(packets: Iterable[ProcessedPacket]) -> CaptureAnalysis:
     events: list[ProtocolEvent] = []
 
     for packet in packet_list:
-        endpoints[packet.source] += 1
-        endpoints[packet.destination] += 1
+        if packet.source != "—":
+            endpoints[packet.source] += 1
+        if packet.destination != "—":
+            endpoints[packet.destination] += 1
         tcp_count += int(packet.dissection.tcp is not None)
         udp_count += int(packet.dissection.udp is not None)
         warning_count += int(bool(packet.dissection.errors))
