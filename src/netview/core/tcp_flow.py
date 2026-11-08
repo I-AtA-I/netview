@@ -45,10 +45,10 @@ def tcp_flow_key_for_packet(
 
     if dissection.ipv4 is not None:
         ip = dissection.ipv4
-        if ip.is_fragment:
+        if getattr(ip, "is_fragment", False):
             return None
-        source_address = ip.source_ip
-        destination_address = ip.destination_ip
+        source_address = getattr(ip, "source_ip", None)
+        destination_address = getattr(ip, "destination_ip", None)
     elif dissection.ipv6 is not None:
         ip = dissection.ipv6
         if ip.is_fragment:
