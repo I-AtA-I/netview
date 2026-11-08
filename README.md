@@ -20,6 +20,7 @@ NetView is a desktop network protocol analyzer built with Python and PySide6. It
 - Filter packets with the built-in display-filter language.
 - Load capture files in a background thread so the interface stays responsive during import.
 - Capture packets live from one manually selected network interface.
+- Pause and resume a live capture without ending the capture session or clearing the packets already collected.
 - Stop live capture without closing the application; captured packets remain available for filtering and inspection.
 - Reassemble IPv4/TCP conversations in both directions, including out-of-order segments, sequence wraparound, overlaps/retransmissions and explicit sequence gaps.
 - Keep promiscuous mode disabled by default.
@@ -189,3 +190,8 @@ The Analysis Center includes:
 - DNS, HTTP and TLS metadata events with packet navigation.
 
 TCP anomaly labels are heuristic observations from the captured sequence and ACK values. They are not proof of packet loss or a network fault. The TCP analysis does not fabricate missing bytes. TLS details are limited to metadata visible in the capture; encrypted application data is not decoded.
+
+
+### Pause and resume live capture
+
+On Linux and other POSIX systems, use **Capture → Pause live capture** or the sidebar button to temporarily suspend the running `dumpcap` process. Resume with the same control. The capture session, packet list, packet numbering and selected interface are retained; the interval while paused is simply not captured. **Stop capture** still ends the session. Pausing and resuming does not restart `dumpcap`.
