@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Iterable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QDialog,
@@ -18,8 +18,38 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from netview.core.analysis import CaptureAnalysis, TrafficBucket, analyze_capture
+from netview.core.analysis import (
+    AnalysisCancelled,
+    CaptureAnalysis,
+    TrafficBucket,
+    analyze_capture,
+)
 from netview.core.pipeline import ProcessedPacket
+
+
+class AnalysisWorker(QThread):
+    analysis_ready = Signal(object)
+    analysis_failed = Signal(str)
+
+    def __init__(self, packets: tuple[ProcessedPacket, ...], parent=None):
+        super().__init__(parent)
+        self.packets = packets
+
+    def run(self) -> None:
+        try:
+            analysis = analyze_capture(
+                self.packets,
+                should_stop=self.isInterruptionRequested,
+            )
+        except AnalysisCancelled:
+            return
+        except Exception as exc:
+            if not self.isInterruptionRequested():
+                self.analysis_failed.emit(str(exc))
+            return
+
+        if not self.isInterruptionRequested():
+            self.analysis_ready.emit(analysis)
 
 
 def _time_label(timestamp: float) -> str:
@@ -89,10 +119,13 @@ class TrafficTimeline(QWidget):
 class AnalysisDialog(QDialog):
     packet_requested = Signal(int)
 
+    MAX_TABLE_ROWS = 5000
+
     def __init__(self, packets: Iterable[ProcessedPacket], parent=None):
         super().__init__(parent)
-        self.packets = list(packets)
-        self.analysis: CaptureAnalysis = analyze_capture(self.packets)
+        self.packets = tuple(packets)
+        self.analysis: CaptureAnalysis | None = None
+        self._close_pending = False
         self.setWindowTitle("NetView — Analysis center")
         self.resize(1120, 760)
         self.setMinimumSize(860, 580)
@@ -116,13 +149,34 @@ class AnalysisDialog(QDialog):
         heading.setStyleSheet("color: #72e0d0; font-size: 9pt; font-weight: 700; letter-spacing: 2px;")
         root.addWidget(heading)
 
+        self._root_layout = root
+        self._loading_label = QLabel("Analyzing capture…")
+        self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._loading_label.setStyleSheet("color: #91a5b2; padding: 32px;")
+        root.addWidget(self._loading_label)
+
+        self._worker = AnalysisWorker(self.packets, self)
+        self._worker.analysis_ready.connect(self._on_analysis_ready)
+        self._worker.analysis_failed.connect(self._on_analysis_failed)
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._worker.start()
+
+    def _on_analysis_ready(self, analysis: CaptureAnalysis) -> None:
+        if self._close_pending:
+            return
+        self.analysis = analysis
+        self.packets = ()
+        self._loading_label.deleteLater()
+        self._loading_label = None
+
         tabs = QTabWidget()
         tabs.addTab(self._overview_page(), "Overview")
         tabs.addTab(self._conversations_page(), "Conversations")
         tabs.addTab(self._tcp_page(), "TCP diagnostics")
         tabs.addTab(self._protocol_page(), "Protocol intelligence")
         tabs.addTab(self._timeline_page(), "Traffic timeline")
-        root.addWidget(tabs, 1)
+        self._root_layout.addWidget(tabs, 1)
 
         note = QLabel(
             "Analysis covers the full capture, not only displayed rows. "
@@ -131,7 +185,28 @@ class AnalysisDialog(QDialog):
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: #8297a4; font-size: 8pt;")
-        root.addWidget(note)
+        self._root_layout.addWidget(note)
+
+    def _on_analysis_failed(self, message: str) -> None:
+        if self._loading_label is not None:
+            self._loading_label.setText(f"Analysis failed: {message}")
+        self.packets = ()
+
+    def _on_worker_finished(self) -> None:
+        self._worker = None
+        if self._close_pending:
+            self.close()
+
+    def closeEvent(self, event) -> None:
+        worker = self._worker
+        if worker is not None and not worker.isFinished():
+            self._close_pending = True
+            worker.requestInterruption()
+            if self._loading_label is not None:
+                self._loading_label.setText("Cancelling analysis…")
+            event.ignore()
+            return
+        event.accept()
 
     def _metric_cards(self, values: list[tuple[str, str]]) -> QWidget:
         page = QWidget()
@@ -158,6 +233,7 @@ class AnalysisDialog(QDialog):
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(14)
         a = self.analysis
+        assert a is not None
         layout.addWidget(self._metric_cards([
             ("Packets", f"{a.packet_count:,}"),
             ("Original bytes", self._format_bytes(a.byte_count)),
@@ -194,12 +270,13 @@ class AnalysisDialog(QDialog):
         return page
 
     def _conversations_page(self) -> QWidget:
+        assert self.analysis is not None
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.addWidget(QLabel("Double-click a conversation to jump to its first packet."))
         rows = []
-        for item in self.analysis.conversations:
+        for item in self.analysis.conversations[:self.MAX_TABLE_ROWS]:
             duration = (
                 max(0.0, item.last_timestamp - item.first_timestamp)
                 if item.first_timestamp is not None and item.last_timestamp is not None
@@ -222,9 +299,15 @@ class AnalysisDialog(QDialog):
             lambda row, _column: self._emit_packet_from_table(table, row, 6)
         )
         layout.addWidget(table, 1)
+        if len(self.analysis.conversations) > self.MAX_TABLE_ROWS:
+            layout.addWidget(QLabel(
+                f"Showing the first {self.MAX_TABLE_ROWS:,} of "
+                f"{len(self.analysis.conversations):,} conversations."
+            ))
         return page
 
     def _tcp_page(self) -> QWidget:
+        assert self.analysis is not None
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -239,13 +322,18 @@ class AnalysisDialog(QDialog):
                 item.conversation,
                 item.detail,
             )
-            for item in self.analysis.tcp_diagnostics
+            for item in self.analysis.tcp_diagnostics[:self.MAX_TABLE_ROWS]
         ]
         table = self._table(["Frame", "Indicator", "Conversation", "Details"], rows)
         table.cellDoubleClicked.connect(
             lambda row, _column: self._emit_packet_from_table(table, row, 0)
         )
         layout.addWidget(table, 1)
+        if len(self.analysis.tcp_diagnostics) > self.MAX_TABLE_ROWS:
+            layout.addWidget(QLabel(
+                f"Showing the first {self.MAX_TABLE_ROWS:,} of "
+                f"{len(self.analysis.tcp_diagnostics):,} TCP diagnostics."
+            ))
         if not rows:
             label = QLabel("No TCP sequence overlaps, out-of-order observations or repeated ACKs were identified.")
             label.setStyleSheet("color: #91a5b2;")
@@ -253,6 +341,7 @@ class AnalysisDialog(QDialog):
         return page
 
     def _protocol_page(self) -> QWidget:
+        assert self.analysis is not None
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -268,16 +357,22 @@ class AnalysisDialog(QDialog):
                 item.destination,
                 item.detail,
             )
-            for item in self.analysis.protocol_events
+            for item in self.analysis.protocol_events[:self.MAX_TABLE_ROWS]
         ]
         table = self._table(["Frame", "Type", "Source", "Destination", "Details"], rows)
         table.cellDoubleClicked.connect(
             lambda row, _column: self._emit_packet_from_table(table, row, 0)
         )
         layout.addWidget(table, 1)
+        if len(self.analysis.protocol_events) > self.MAX_TABLE_ROWS:
+            layout.addWidget(QLabel(
+                f"Showing the first {self.MAX_TABLE_ROWS:,} of "
+                f"{len(self.analysis.protocol_events):,} protocol events."
+            ))
         return page
 
     def _timeline_page(self) -> QWidget:
+        assert self.analysis is not None
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(12, 12, 12, 12)

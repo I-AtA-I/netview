@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable
 
 from .pipeline import ProcessedPacket
+
+
+class AnalysisCancelled(Exception):
+    """Raised when a caller requests cancellation during capture analysis."""
+
+
+def _check_cancelled(should_stop: Callable[[], bool] | None) -> None:
+    if should_stop is not None and should_stop():
+        raise AnalysisCancelled
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,9 +95,10 @@ class _ConversationBuilder:
             self.protocols = set()
         self.protocols.add(packet.protocol)
         if packet.timestamp is not None:
-            if self.first_timestamp is None:
+            if self.first_timestamp is None or packet.timestamp < self.first_timestamp:
                 self.first_timestamp = packet.timestamp
-            self.last_timestamp = packet.timestamp
+            if self.last_timestamp is None or packet.timestamp > self.last_timestamp:
+                self.last_timestamp = packet.timestamp
 
     def finish(self) -> ConversationStats:
         return ConversationStats(
@@ -142,12 +152,16 @@ def _signed_sequence_delta(sequence: int, reference: int) -> int:
     return ((sequence - reference + (1 << 31)) % (1 << 32)) - (1 << 31)
 
 
-def _tcp_diagnostics(packets: list[ProcessedPacket]) -> tuple[TCPDiagnostic, ...]:
+def _tcp_diagnostics(
+    packets: list[ProcessedPacket] | tuple[ProcessedPacket, ...],
+    should_stop: Callable[[], bool] | None = None,
+) -> tuple[TCPDiagnostic, ...]:
     flow_state: dict[tuple[str, str, str], dict[str, int | None]] = {}
     ack_counts: Counter[tuple[str, str, str, int]] = Counter()
     diagnostics: list[TCPDiagnostic] = []
 
     for packet in packets:
+        _check_cancelled(should_stop)
         tcp = packet.dissection.tcp
         endpoints = _tcp_endpoints(packet)
         if tcp is None or endpoints is None:
@@ -302,21 +316,38 @@ def _protocol_events(packet: ProcessedPacket) -> list[ProtocolEvent]:
     return events
 
 
-def _traffic_buckets(packets: list[ProcessedPacket], bucket_limit: int = 48) -> tuple[TrafficBucket, ...]:
-    timed = [packet for packet in packets if packet.timestamp is not None]
-    if not timed:
+def _traffic_buckets(
+    packets: list[ProcessedPacket] | tuple[ProcessedPacket, ...],
+    bucket_limit: int = 48,
+    should_stop: Callable[[], bool] | None = None,
+) -> tuple[TrafficBucket, ...]:
+    start: float | None = None
+    end: float | None = None
+
+    for packet in packets:
+        _check_cancelled(should_stop)
+        timestamp = packet.timestamp
+        if timestamp is None:
+            continue
+        if start is None or timestamp < start:
+            start = timestamp
+        if end is None or timestamp > end:
+            end = timestamp
+
+    if start is None or end is None:
         return ()
 
-    start = min(float(packet.timestamp) for packet in timed)
-    end = max(float(packet.timestamp) for packet in timed)
     span = max(0.0, end - start)
     count = min(bucket_limit, max(1, int(span) + 1))
     width = span / count if span else 1.0
     packet_counts = [0] * count
     byte_counts = [0] * count
 
-    for packet in timed:
-        index = min(count - 1, int((float(packet.timestamp) - start) / width)) if span else 0
+    for packet in packets:
+        _check_cancelled(should_stop)
+        if packet.timestamp is None:
+            continue
+        index = min(count - 1, int((packet.timestamp - start) / width)) if span else 0
         packet_counts[index] += 1
         byte_counts[index] += packet.length
 
@@ -331,17 +362,33 @@ def _traffic_buckets(packets: list[ProcessedPacket], bucket_limit: int = 48) -> 
     )
 
 
-def analyze_capture(packets: Iterable[ProcessedPacket]) -> CaptureAnalysis:
-    packet_list = list(packets)
-    protocols = Counter(packet.protocol for packet in packet_list)
+def analyze_capture(
+    packets: Iterable[ProcessedPacket],
+    *,
+    should_stop: Callable[[], bool] | None = None,
+) -> CaptureAnalysis:
+    _check_cancelled(should_stop)
+    if isinstance(packets, (list, tuple)):
+        packet_list = packets
+    else:
+        packet_list = []
+        for packet in packets:
+            _check_cancelled(should_stop)
+            packet_list.append(packet)
+
+    protocols: Counter[str] = Counter()
     endpoints: Counter[str] = Counter()
     builders: dict[tuple[str, str, str], _ConversationBuilder] = {}
     tcp_count = 0
     udp_count = 0
     warning_count = 0
+    byte_count = 0
     events: list[ProtocolEvent] = []
 
     for packet in packet_list:
+        _check_cancelled(should_stop)
+        protocols[packet.protocol] += 1
+        byte_count += packet.length
         if packet.source != "—":
             endpoints[packet.source] += 1
         if packet.destination != "—":
@@ -363,22 +410,25 @@ def analyze_capture(packets: Iterable[ProcessedPacket]) -> CaptureAnalysis:
             builders[key] = builder
         builder.add(packet)
 
+    _check_cancelled(should_stop)
     conversations = sorted(
         (builder.finish() for builder in builders.values()),
         key=lambda item: (item.packet_count, item.byte_count),
         reverse=True,
     )
+    diagnostics = _tcp_diagnostics(packet_list, should_stop)
+    buckets = _traffic_buckets(packet_list, should_stop=should_stop)
 
     return CaptureAnalysis(
         packet_count=len(packet_list),
-        byte_count=sum(packet.length for packet in packet_list),
+        byte_count=byte_count,
         tcp_count=tcp_count,
         udp_count=udp_count,
         warning_count=warning_count,
         protocol_counts=tuple(protocols.most_common()),
         endpoint_counts=tuple(endpoints.most_common()),
         conversations=tuple(conversations),
-        tcp_diagnostics=_tcp_diagnostics(packet_list),
+        tcp_diagnostics=diagnostics,
         protocol_events=tuple(events),
-        traffic_buckets=_traffic_buckets(packet_list),
+        traffic_buckets=buckets,
     )

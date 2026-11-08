@@ -304,7 +304,7 @@ class MainWindow(QMainWindow):
         side.addWidget(self.capture_state_label)
         side.addStretch(1)
 
-        footer = QLabel("NETVIEW 1.0  ·  PACKET ANALYSIS")
+        footer = QLabel("NETVIEW 1.0.0  ·  PACKET ANALYSIS")
         footer.setStyleSheet("font-size: 7pt; color: #607580; letter-spacing: 1px;")
         side.addWidget(footer)
         shell.addWidget(sidebar)

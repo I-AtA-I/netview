@@ -1,5 +1,7 @@
+import pytest
+
 from netview.core import PacketRecord, process_packet
-from netview.core.analysis import analyze_capture
+from netview.core.analysis import AnalysisCancelled, analyze_capture
 
 
 MAC_DST = bytes.fromhex("aabbccddeeff")
@@ -153,3 +155,32 @@ def test_analysis_does_not_flag_truncated_payload_as_retransmission():
     result = analyze_capture([packet, truncated])
 
     assert result.tcp_diagnostics == ()
+
+
+def test_conversation_timestamps_use_capture_minimum_and_maximum():
+    packets = [
+        make_tcp_packet(1, payload=b"later", timestamp=103.0),
+        make_tcp_packet(2, payload=b"earlier", timestamp=100.0),
+    ]
+
+    result = analyze_capture(packets)
+    conversation = result.conversations[0]
+
+    assert conversation.first_timestamp == 100.0
+    assert conversation.last_timestamp == 103.0
+
+
+def test_analysis_can_be_cancelled_between_packets():
+    packets = [
+        make_tcp_packet(1, payload=b"first", timestamp=1.0),
+        make_tcp_packet(2, payload=b"second", timestamp=2.0),
+    ]
+    checks = 0
+
+    def should_stop():
+        nonlocal checks
+        checks += 1
+        return checks == 2
+
+    with pytest.raises(AnalysisCancelled):
+        analyze_capture(packets, should_stop=should_stop)

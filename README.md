@@ -22,10 +22,11 @@ NetView is a desktop network protocol analyzer built with Python and PySide6. It
 - Highlight protocol families and dissection warnings directly in the packet list.
 - Filter packets with the built-in display-filter language.
 - Load capture files in a background thread so the interface stays responsive during import.
+- Build capture-wide Analysis Center summaries in a background thread.
 - Capture packets live from one manually selected network interface.
 - Pause and resume a live capture without ending the capture session or clearing the packets already collected.
 - Stop live capture without closing the application; captured packets remain available for filtering and inspection.
-- Reassemble IPv4/TCP conversations in both directions, including out-of-order segments, sequence wraparound, overlaps/retransmissions and explicit sequence gaps.
+- Reassemble IPv4 and IPv6 TCP conversations in both directions, including out-of-order segments, sequence wraparound, overlaps/retransmissions and explicit sequence gaps.
 - Visualize IPv4 and IPv6 TCP conversations as a scrollable sequence graph with direction, capture time, SEQ/ACK values, flags, payload lengths and possible sequence overlaps (Ctrl+Shift+G).
 - Keep promiscuous mode disabled by default.
 - Drag and drop capture files into the application.
@@ -44,6 +45,8 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
+
+The installation also provides the `netview` command.
 
 Run the application:
 
@@ -133,13 +136,13 @@ Supported fields and operators are implemented in `src/netview/filters/engine.py
 
 ## Current scope and limitations
 
-NetView is an early portfolio project, not a replacement for Wireshark. Application dissection is currently packet-based: a DNS message, HTTP/1.x start line and header block, or TLS record/hello must be sufficiently present in the captured packet. Application messages split across multiple TCP segments are not yet reassembled for application decoding, even though a separate Follow TCP Stream view is available. DNS-over-TLS, DNS-over-HTTPS, HTTP/2 and HTTP/3 are not decoded. HTTP parsing deliberately omits credential-bearing Cookie and Authorization headers and does not parse message bodies. TLS support is metadata-only: NetView does not decrypt TLS application data. TLS 1.3 encrypts most handshake messages after ServerHello, and Encrypted ClientHello (ECH) can hide the server name; in those cases SNI may not be available. Checksum validation, IP fragment reassembly and TCP connection-reuse detection remain future work. TCP stream reconstruction currently groups IPv4 conversations by the endpoint/port tuple; reused tuples within one capture can therefore be combined. The separate TCP Flow Graph supports unfragmented IPv4 and IPv6 TCP conversations. Fragmented TCP packets are excluded until IP fragment reassembly is implemented. Sequence gaps are reported only between observed payload segments, because a missing tail cannot be inferred reliably.
+NetView is an early portfolio project, not a replacement for Wireshark. Application dissection is currently packet-based: a DNS message, HTTP/1.x start line and header block, or TLS record/hello must be sufficiently present in the captured packet. Application messages split across multiple TCP segments are not yet reassembled for application decoding, even though a separate Follow TCP Stream view is available. DNS-over-TLS, DNS-over-HTTPS, HTTP/2 and HTTP/3 are not decoded. HTTP parsing deliberately omits credential-bearing Cookie and Authorization headers and does not parse message bodies. TLS support is metadata-only: NetView does not decrypt TLS application data. TLS 1.3 encrypts most handshake messages after ServerHello, and Encrypted ClientHello (ECH) can hide the server name; in those cases SNI may not be available. Checksum validation, IP fragment reassembly and TCP connection-reuse detection remain future work. TCP stream reconstruction groups IPv4 and IPv6 conversations by the endpoint/port tuple; reused tuples within one capture can therefore be combined. The separate TCP Flow Graph supports unfragmented IPv4 and IPv6 TCP conversations. Fragmented TCP packets are excluded until IP fragment reassembly is implemented. Sequence gaps are reported only between observed payload segments, because a missing tail cannot be inferred reliably.
 
 Live capture uses `dumpcap` on one interface selected by the user. Promiscuous mode is explicitly disabled. On Linux, `dumpcap` must have the operating-system capture permissions configured; do not run the GUI, IDE, or Python interpreter as root just to bypass a permission error.
 
 Only capture traffic on your own device and networks, or where you have explicit permission to monitor. Captured traffic may contain private information.
 
-The GUI uses a dedicated capture sidebar and a packet workspace with protocol-aware row accents, a decoded-layer inspector and a raw byte view. Selecting a mapped protocol field highlights its corresponding captured bytes in the hex view; fields for which a reliable byte offset is not available remain unhighlighted. The Analysis Center works across the full capture and is independent of the active display filter. TCP sequence indicators are explicitly heuristic: capture gaps, truncation and capture order can resemble retransmission or reordering, so NetView does not label them as proven packet loss. TLS analysis reports visible handshake metadata only and never decrypts application data. Packet notes are stored separately from the PCAP in a *.netview.json sidecar file and can be saved with File → Save packet notes. The application loads packets into memory after reading them in batches. It keeps the UI responsive during import, but very large capture files can still consume substantial memory.
+The GUI uses a dedicated capture sidebar and a packet workspace with protocol-aware row accents, a decoded-layer inspector and a raw byte view. Analysis is calculated in a worker thread. To keep large captures manageable, the Analysis Center initially displays up to 5,000 rows in each detailed table. Selecting a mapped protocol field highlights its corresponding captured bytes in the hex view; fields for which a reliable byte offset is not available remain unhighlighted. The Analysis Center works across the full capture and is independent of the active display filter. TCP sequence indicators are explicitly heuristic: capture gaps, truncation and capture order can resemble retransmission or reordering, so NetView does not label them as proven packet loss. TLS analysis reports visible handshake metadata only and never decrypts application data. Packet notes are stored separately from the PCAP in a *.netview.json sidecar file and can be saved with File → Save packet notes. The application loads packets into memory after reading them in batches. It keeps the UI responsive during import, but very large capture files can still consume substantial memory.
 
 ## Project layout
 
@@ -184,7 +187,7 @@ Do not set this globally unless you specifically need it; on a working Wayland s
 - Ctrl+F opens packet search. Search continues after the current packet and wraps to the beginning.
 - Ctrl+B adds or edits a note for the selected packet. A star appears in the packet row while a note exists.
 - Ctrl+Shift+E opens the packet-note save dialog. For file captures, the default path is the capture filename followed by .netview.json; opening that capture loads the sidecar automatically.
-- Ctrl+Shift+S opens the Analysis Center. Double-click a conversation, TCP diagnostic or protocol event to select its packet in the main workspace.
+- Ctrl+Shift+S opens the Analysis Center. Analysis runs in a worker thread; double-click a conversation, TCP diagnostic or protocol event to select its packet in the main workspace.
 - Selecting a decoded field highlights its known byte range in the hexadecimal viewer. Byte ranges are only attached where parser offsets are reliable.
 
 The Analysis Center includes:
