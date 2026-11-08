@@ -32,7 +32,10 @@ def make_tcp_packet():
 
 
 def test_packet_context_menu_builds_filters_and_stream_action(qtbot, monkeypatch):
-    monkeypatch.setattr("netview.gui.main_window.list_interfaces", lambda: ["lo"])
+    monkeypatch.setattr(
+        "netview.gui.main_window.list_interface_details",
+        lambda: [("lo", "lo")],
+    )
     window = MainWindow()
     qtbot.addWidget(window)
 
@@ -61,7 +64,10 @@ def test_packet_context_menu_builds_filters_and_stream_action(qtbot, monkeypatch
 
 
 def test_export_actions_enable_when_capture_has_packets(qtbot, monkeypatch):
-    monkeypatch.setattr("netview.gui.main_window.list_interfaces", lambda: ["lo"])
+    monkeypatch.setattr(
+        "netview.gui.main_window.list_interface_details",
+        lambda: [("lo", "lo")],
+    )
     window = MainWindow()
     qtbot.addWidget(window)
 

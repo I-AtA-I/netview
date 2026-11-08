@@ -12,7 +12,10 @@ class FinishedWorker:
 
 
 def test_actions_reenable_when_workers_have_finished(qtbot, monkeypatch):
-    monkeypatch.setattr("netview.gui.main_window.list_interfaces", lambda: ["lo"])
+    monkeypatch.setattr(
+        "netview.gui.main_window.list_interface_details",
+        lambda: [("lo", "lo")],
+    )
 
     window = MainWindow()
     qtbot.addWidget(window)
@@ -66,7 +69,6 @@ class RunningWorker:
         return True
 
 
-
 def test_close_requests_analysis_worker_interruption_without_blocking(qtbot, monkeypatch):
     from PySide6.QtCore import QThread
 
@@ -76,7 +78,10 @@ def test_close_requests_analysis_worker_interruption_without_blocking(qtbot, mon
                 self.msleep(5)
             self.msleep(150)
 
-    monkeypatch.setattr("netview.gui.main_window.list_interfaces", lambda: ["lo"])
+    monkeypatch.setattr(
+        "netview.gui.main_window.list_interface_details",
+        lambda: [("lo", "lo")],
+    )
     window = MainWindow()
     qtbot.addWidget(window)
     worker = InterruptibleWorker(window)
@@ -94,7 +99,10 @@ def test_close_requests_analysis_worker_interruption_without_blocking(qtbot, mon
 
 
 def test_packet_tools_remain_available_during_live_capture(qtbot, monkeypatch):
-    monkeypatch.setattr("netview.gui.main_window.list_interfaces", lambda: ["lo"])
+    monkeypatch.setattr(
+        "netview.gui.main_window.list_interface_details",
+        lambda: [("lo", "lo")],
+    )
 
     window = MainWindow()
     qtbot.addWidget(window)
@@ -128,11 +136,13 @@ def test_packet_tools_remain_available_during_live_capture(qtbot, monkeypatch):
     window.close()
 
 
-
 def test_load_capture_cancel_preserves_unsaved_notes(qtbot, monkeypatch):
     from pathlib import Path
 
-    monkeypatch.setattr("netview.gui.main_window.list_interfaces", lambda: ["lo"])
+    monkeypatch.setattr(
+        "netview.gui.main_window.list_interface_details",
+        lambda: [("lo", "lo")],
+    )
     window = MainWindow()
     qtbot.addWidget(window)
     current_path = Path("current.pcap")

@@ -143,7 +143,7 @@ def test_list_interfaces_uses_dumpcap(monkeypatch):
 
 
 def test_list_interfaces_reports_missing_dumpcap(monkeypatch):
-    monkeypatch.setattr("netview.capture.live.shutil.which", lambda name: None)
+    monkeypatch.setattr("netview.capture.live.find_dumpcap", lambda: None)
 
     with pytest.raises(LiveCaptureError, match="dumpcap was not found"):
         list_interfaces()

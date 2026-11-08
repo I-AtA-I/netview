@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from netview.capture import LiveCaptureError, list_interfaces
+from netview.capture import LiveCaptureError
+from netview.capture.live import list_interface_details
 from netview.capture.export import export_packets as write_export
 from netview.core.dissector import ETHERTYPE_NAMES
 from netview.core.tls import cipher_suite_name, tls_version_name
@@ -706,9 +707,10 @@ class MainWindow(QMainWindow):
         )
 
     def refresh_interfaces(self) -> None:
-        current = self.interface_combo.currentText()
+        current = self.interface_combo.currentData()
+
         try:
-            interfaces = list_interfaces()
+            interfaces = list_interface_details()
         except LiveCaptureError as exc:
             self.interface_combo.clear()
             self.capture_state_label.setText("Could not list interfaces")
@@ -717,9 +719,14 @@ class MainWindow(QMainWindow):
             return
 
         self.interface_combo.clear()
-        self.interface_combo.addItems(interfaces)
-        if current and current in interfaces:
-            self.interface_combo.setCurrentText(current)
+
+        for identifier, display_name in interfaces:
+            self.interface_combo.addItem(display_name, identifier)
+
+        if current:
+            index = self.interface_combo.findData(current)
+            if index >= 0:
+                self.interface_combo.setCurrentIndex(index)
 
         if interfaces:
             self.capture_state_label.setText(
@@ -738,9 +745,15 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("A live capture is already running.")
             return
 
-        interface = self.interface_combo.currentText().strip()
+        interface = self.interface_combo.currentData()
+        display_name = self.interface_combo.currentText().strip()
+
         if not interface:
-            QMessageBox.warning(self, "No interface selected", "Select a network interface first.")
+            QMessageBox.warning(
+                self,
+                "No interface selected",
+                "Select a network interface first.",
+            )
             return
         if not self._confirm_unsaved_annotations():
             return
@@ -753,10 +766,10 @@ class MainWindow(QMainWindow):
         self._annotations = {}
         self._annotations_dirty = False
         self.model.set_annotations(self._annotations)
-        self._live_interface = interface
+        self._live_interface = display_name
         self._live_capture_error = False
         self._live_capture_stopping = False
-        self.file_label.setText(f"Live capture · {interface}")
+        self.file_label.setText(f"Live capture · {display_name}")
         self.filter_status.setStyleSheet("color: #91a5b2; font-size: 9pt;")
         self.filter_status.setText("Capturing live packets. Enter a display filter or leave it empty.")
 
@@ -768,8 +781,10 @@ class MainWindow(QMainWindow):
         self._live_worker.finished.connect(self._on_live_capture_finished)
         self._live_worker.finished.connect(self._live_worker.deleteLater)
 
-        self.capture_state_label.setText(f"Capturing on {interface} · promiscuous mode off")
-        self.statusBar().showMessage(f"Starting live capture on {interface}…")
+        self.capture_state_label.setText(
+            f"Capturing on {display_name} · promiscuous mode off"
+        )
+        self.statusBar().showMessage(f"Starting live capture on {display_name}…")
         self._live_worker.start()
         self._update_capture_controls()
 
