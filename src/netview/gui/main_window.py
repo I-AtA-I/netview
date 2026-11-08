@@ -1005,7 +1005,7 @@ class MainWindow(QMainWindow):
                 ("Reserved flag", ip.reserved_flag),
                 ("Don't fragment", ip.dont_fragment),
                 ("More fragments", ip.more_fragments),
-                ("Fragment offset", f"{ip.fragment_offset * 8} bytes"),
+                ("Fragment offset", f"{ip.fragment_offset} bytes"),
                 ("TTL", ip.ttl),
                 ("Protocol number", ip.protocol),
                 ("Header checksum", f"0x{ip.header_checksum:04x}"),

@@ -85,15 +85,15 @@ def test_dns_tcp_truncated_frame():
 
 def test_dns_name_length_uses_wire_bytes_not_decoded_escape_text():
     raw_name = (
-        b"\\x3f" + b"\\xff" * 63
-        + b"\\x3f" + b"\\xff" * 63
-        + b"\\x3f" + b"\\xff" * 63
-        + b"\\x00"
+        b"\x3f" + b"\xff" * 63
+        + b"\x3f" + b"\xff" * 63
+        + b"\x3f" + b"\xff" * 63
+        + b"\x00"
     )
     message = (
-        b"\\x12\\x34\\x01\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00"
+        b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
         + raw_name
-        + b"\\x00\\x01\\x00\\x01"
+        + b"\x00\x01\x00\x01"
     )
 
     dns = parse_dns_message(message)
