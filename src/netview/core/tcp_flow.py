@@ -13,7 +13,7 @@ def _record_sequence_range(
     start: int,
     end: int,
 ) -> bool:
-    """Record a range in a sorted, merged interval list and report overlap."""
+    """Add a sequence range and report whether it overlaps an earlier one."""
     index = bisect_left(ranges, (start, end))
     overlaps = index > 0 and ranges[index - 1][1] > start
 
@@ -68,7 +68,7 @@ class TCPFlowGraph:
 def tcp_flow_key_for_packet(
     packet: ProcessedPacket,
 ) -> tuple[TCPStreamKey, int] | None:
-    """Return a direction-independent key for an unfragmented IPv4/IPv6 TCP packet."""
+    """Get a shared key for both directions of an IPv4/IPv6 TCP connection."""
     dissection = packet.dissection
     tcp = dissection.tcp
     if tcp is None:
@@ -103,7 +103,7 @@ def build_tcp_flow_graph(
     packets: Iterable[ProcessedPacket],
     target_key: TCPStreamKey,
 ) -> TCPFlowGraph | None:
-    """Build a packet-by-packet TCP sequence diagram for one conversation.
+    """Build a TCP sequence diagram for one conversation.
 
     Overlap is a capture-order heuristic: it marks sequence ranges that
     intersect an earlier observed payload range in the same direction.

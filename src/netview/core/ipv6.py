@@ -18,7 +18,7 @@ EXTENSION_NAMES = {
     140: "Shim6 Protocol",
 }
 
-# Extension headers whose length is encoded in 8-byte units.
+# These extension header lengths are in 8-byte units.
 _OPTIONS_HEADERS = {0, 43, 60, 135, 139, 140}
 
 
@@ -92,8 +92,7 @@ def parse_ipv6_packet(data: bytes) -> IPv6Header:
     source = data[8:24]
     destination = data[24:40]
 
-    # IPv6 jumbograms use a Hop-by-Hop Jumbo Payload option and are not
-    # interpreted by this first implementation.
+    # Jumbograms need the Jumbo Payload option; they aren't handled here.
     if payload_length == 0:
         captured_length = min(len(data), 40)
         bounded_length = 40
@@ -108,7 +107,7 @@ def parse_ipv6_packet(data: bytes) -> IPv6Header:
     more_fragments = False
     fragment_identification = None
 
-    # Protect the parser from malformed cyclic/overlong extension chains.
+    # Stop if the extension chain is malformed or too long.
     while next_header in (_OPTIONS_HEADERS | {44, 51}):
         if len(extensions) >= 16:
             raise IPv6ParseError("Too many IPv6 extension headers")
@@ -160,7 +159,7 @@ def parse_ipv6_packet(data: bytes) -> IPv6Header:
         offset += length
         next_header = following_header
 
-        # Non-initial fragments do not begin with the upper-layer header.
+        # Only the first fragment contains the transport header.
         if header_type == 44 and fragment_offset > 0:
             break
 

@@ -639,9 +639,7 @@ class MainWindow(QMainWindow):
         self._update_capture_controls()
 
     def _update_capture_controls(self) -> None:
-        # QThread references can outlive the worker thread briefly while Qt
-        # delivers queued finished/deleteLater events. UI availability must
-        # follow the actual thread state, not whether the Python reference exists.
+        # Qt may keep the worker reference briefly after the thread has stopped.
         loading = self._worker is not None and self._worker.isRunning()
         capturing = self._live_worker is not None and self._live_worker.isRunning()
         analyzing = (
@@ -649,9 +647,7 @@ class MainWindow(QMainWindow):
             or (self._flow_worker is not None and self._flow_worker.isRunning())
         )
         idle = not loading and not capturing and not analyzing
-        # Analysis operates on a snapshot of packets already in the model.
-        # It does not need the live-capture worker to exit: the GUI owns all
-        # model updates, and stream reconstruction receives an immutable tuple.
+        # Analyze a snapshot; the live capture can keep running.
         packet_tools_available = not loading and self.model.total_count > 0
         has_interfaces = self.interface_combo.count() > 0
         has_selected_tcp = (

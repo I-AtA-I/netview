@@ -175,7 +175,7 @@ def _decode_name(data: bytes, offset: int) -> tuple[str, int]:
         wire_length += 1 + len(raw_label)
         cursor += 1 + length
 
-        # DNS name length is measured in wire octets, not decoded characters.
+        # DNS limits the encoded name length, not the decoded string length.
         if wire_length + 1 > 255:
             raise DNSParseError("DNS name is longer than 255 bytes")
 
@@ -277,8 +277,7 @@ def parse_dns_message(data: bytes, *, tcp_framed: bool = False) -> DNSMessage:
     authority_count = int.from_bytes(data[8:10], "big")
     additional_count = int.from_bytes(data[10:12], "big")
 
-    # Counts are bounded by the packet length in practice. This also prevents
-    # hostile count fields from causing excessive work on tiny captures.
+    # Cap the counts so malformed headers can't trigger work beyond the packet.
     total_records = question_count + answer_count + authority_count + additional_count
     if total_records > len(data):
         raise DNSParseError("DNS section counts exceed the available message size")

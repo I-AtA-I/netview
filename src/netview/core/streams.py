@@ -125,7 +125,7 @@ class _DirectionBuilder:
                 truncated_packet_numbers=tuple(self.truncated_packet_numbers),
             )
 
-        # Stable sorting preserves capture order for segments with equal offsets.
+
         segments = sorted(
             self.segments,
             key=lambda segment: segment.sequence_offset,
@@ -197,7 +197,7 @@ class _StreamBuilder:
             network_header_length = ipv4.header_length
             network_total_length = ipv4.total_length
         else:
-            # upper_layer_offset includes the IPv6 base and extension headers.
+            # Skip the IPv6 base and extension headers when locating TCP data.
             network_header_length = ipv6.upper_layer_offset
             network_total_length = ipv6.total_length
         expected_payload_length = max(
@@ -235,12 +235,12 @@ class _StreamBuilder:
 
 
 def signed_sequence_delta(sequence: int, reference: int) -> int:
-    """Return the nearest signed 32-bit distance from reference to sequence."""
+    """Get the signed sequence-number distance from a reference value."""
     return ((sequence - reference + _SEQUENCE_HALF) % _SEQUENCE_MODULUS) - _SEQUENCE_HALF
 
 
 def tcp_stream_key_for_packet(packet: ProcessedPacket) -> tuple[TCPStreamKey, int] | None:
-    """Return the canonical IPv4/IPv6 TCP conversation key and packet direction."""
+    """Get the conversation key and direction for an IPv4 or IPv6 TCP packet."""
     ipv4 = packet.dissection.ipv4
     ipv6 = packet.dissection.ipv6
     tcp = packet.dissection.tcp
@@ -248,7 +248,7 @@ def tcp_stream_key_for_packet(packet: ProcessedPacket) -> tuple[TCPStreamKey, in
         return None
     ip = ipv4 or ipv6
     if ip.is_fragment:
-        # Wait for IP fragment reassembly before using an incomplete segment.
+        # Fragmented packets need reassembly before they can form a TCP stream.
         return None
 
     source = StreamEndpoint(ip.source_ip, tcp.source_port)

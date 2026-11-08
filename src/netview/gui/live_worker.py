@@ -14,7 +14,7 @@ from netview.core.pipeline import ProcessedPacket, process_packet
 
 
 class LiveCaptureWorker(QThread):
-    """Run dumpcap as a limited capture helper and keep the GUI unprivileged."""
+    """Run dumpcap and forward captured packets to the GUI."""
 
     batch_ready = Signal(list)
     capture_failed = Signal(str)
@@ -183,8 +183,7 @@ class LiveCaptureWorker(QThread):
             )
             return
 
-        # -p explicitly disables promiscuous mode. A single interface and
-        # classic PCAP output make the stream simple to decode incrementally.
+        # Keep promiscuous mode off and use PCAP output for the packet reader.
         command = [
             executable,
             "-Q",
@@ -238,7 +237,7 @@ class LiveCaptureWorker(QThread):
                 stderr_text = stderr_file.read().decode("utf-8", errors="replace")
 
                 if self._reader_error is not None and not self._stop_event.is_set():
-                    # Prefer dumpcap's own diagnostic if it exited during startup.
+                    # Use dumpcap's error message when startup fails.
                     if returncode != 0 and stderr_text.strip():
                         message = self._format_dumpcap_error(
                             stderr_text,

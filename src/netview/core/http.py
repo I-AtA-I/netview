@@ -7,8 +7,7 @@ _REQUEST_LINE_RE = re.compile(
 )
 _RESPONSE_LINE_RE = re.compile(rb"^(HTTP/1\.[01]) ([0-9]{3})(?: (.*))?$")
 
-# Only non-credential metadata is retained. Cookie and Authorization headers
-# are intentionally never copied into the parsed representation.
+# Keep credentials out of packet metadata.
 _SAFE_HEADERS = {
     "host",
     "content-type",
@@ -56,8 +55,7 @@ def looks_like_http(data: bytes) -> bool:
 
 
 def _clean_header_value(value: bytes) -> str:
-    # HTTP/1 header values are ISO-8859-1 byte sequences. Trim and cap values
-    # so packet metadata cannot create unbounded GUI strings.
+    # HTTP/1 headers use ISO-8859-1. Keep displayed values short.
     decoded = value.decode("iso-8859-1", errors="replace").strip()
     return decoded[:512]
 
@@ -100,8 +98,7 @@ def parse_http_message(data: bytes) -> HTTPMessage:
         if not raw_line:
             continue
         if raw_line[:1] in (b" ", b"\t"):
-            # Obsolete folded headers: do not attempt to associate them with
-            # sensitive or previously parsed fields.
+            # Ignore obsolete folded headers rather than attaching them to another field.
             continue
         if b":" not in raw_line:
             continue

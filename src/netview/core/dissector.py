@@ -126,8 +126,7 @@ def _decode_application_payload(
         (transport == "udp" and (source_port in {53, 5353, 5355} or destination_port in {53, 5353, 5355}))
         or (transport == "tcp" and (source_port == 53 or destination_port == 53))
     )
-    # A well-known port alone is not enough to call arbitrary payload DNS.
-    # Require enough bytes for a DNS header (plus TCP framing where applicable).
+    # Don't treat every packet on a DNS port as DNS; check for a full header.
     if dns_candidate and len(payload) >= (14 if transport == "tcp" else 12):
         tcp_framed = transport == "tcp"
         try:
