@@ -65,11 +65,12 @@ def test_packet_tools_remain_available_during_live_capture(qtbot, monkeypatch):
         number=1,
         dissection=SimpleNamespace(ipv4=object(), tcp=object()),
     )
-    window.model.append_packets([packet])
     window._selected_packet = packet
     window._live_worker = RunningWorker()
 
-    window._update_capture_controls()
+    # The first live batch must refresh Analyze actions without relying on
+    # a later Stop/finished signal or a separate UI event.
+    window._on_live_packet_batch([packet])
 
     assert window.statistics_action.isEnabled()
     assert window.follow_stream_action.isEnabled()
