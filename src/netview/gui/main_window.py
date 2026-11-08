@@ -31,6 +31,7 @@ from netview.core.dissector import ETHERTYPE_NAMES
 from netview.core.tls import cipher_suite_name, tls_version_name
 from netview.core.pipeline import ProcessedPacket
 from netview.core.streams import tcp_stream_key_for_packet
+from netview.core.tcp_flow import tcp_flow_key_for_packet
 from netview.filters import FilterSyntaxError
 from netview.gui.table_model import PacketTableModel
 
@@ -40,6 +41,8 @@ from .live_worker import LiveCaptureWorker
 from .filter_manager import FilterManagerDialog
 from .stream_dialog import TCPStreamDialog
 from .stream_worker import TCPStreamWorker
+from .tcp_flow_dialog import TCPFlowGraphDialog
+from .tcp_flow_worker import TCPFlowWorker
 from .worker import CaptureLoadWorker
 
 
@@ -132,6 +135,7 @@ class MainWindow(QMainWindow):
         self._annotations: dict[int, str] = {}
         self._hex_data_length = 0
         self._stream_worker: TCPStreamWorker | None = None
+        self._flow_worker: TCPFlowWorker | None = None
 
         self._build_actions()
         self._build_ui()
@@ -212,6 +216,11 @@ class MainWindow(QMainWindow):
         self.follow_stream_action.triggered.connect(self.follow_tcp_stream)
         self.follow_stream_action.setEnabled(False)
         analyze_menu.addAction(self.follow_stream_action)
+        self.tcp_flow_action = QAction("TCP Flow Graph", self)
+        self.tcp_flow_action.setShortcut(QKeySequence("Ctrl+Shift+G"))
+        self.tcp_flow_action.triggered.connect(self.show_tcp_flow_graph)
+        self.tcp_flow_action.setEnabled(False)
+        analyze_menu.addAction(self.tcp_flow_action)
 
         file_menu.addSeparator()
         exit_action = QAction("Exit", self)
@@ -473,9 +482,14 @@ class MainWindow(QMainWindow):
                 lambda _checked=False, value=expression: self._set_filter_expression(value)
             )
 
-        if tcp_stream_key_for_packet(packet) is not None:
+        flow_key = tcp_flow_key_for_packet(packet)
+        stream_key = tcp_stream_key_for_packet(packet)
+        if flow_key is not None or stream_key is not None:
             menu.addSeparator()
-            menu.addAction("Follow TCP Stream", self.follow_tcp_stream)
+            if flow_key is not None:
+                menu.addAction("TCP Flow Graph", self.show_tcp_flow_graph)
+            if stream_key is not None:
+                menu.addAction("Follow TCP Stream", self.follow_tcp_stream)
         menu.addSeparator()
         menu.addAction("Add / edit packet note…", self.mark_packet_note)
         menu.addSeparator()
@@ -627,7 +641,10 @@ class MainWindow(QMainWindow):
         # follow the actual thread state, not whether the Python reference exists.
         loading = self._worker is not None and self._worker.isRunning()
         capturing = self._live_worker is not None and self._live_worker.isRunning()
-        analyzing = self._stream_worker is not None and self._stream_worker.isRunning()
+        analyzing = (
+            (self._stream_worker is not None and self._stream_worker.isRunning())
+            or (self._flow_worker is not None and self._flow_worker.isRunning())
+        )
         idle = not loading and not capturing and not analyzing
         # Analysis operates on a snapshot of packets already in the model.
         # It does not need the live-capture worker to exit: the GUI owns all
@@ -638,6 +655,10 @@ class MainWindow(QMainWindow):
             self._selected_packet is not None
             and self._selected_packet.dissection.ipv4 is not None
             and self._selected_packet.dissection.tcp is not None
+        )
+        has_selected_tcp_flow = (
+            self._selected_packet is not None
+            and tcp_flow_key_for_packet(self._selected_packet) is not None
         )
 
         self.interface_combo.setEnabled(idle)
@@ -662,6 +683,9 @@ class MainWindow(QMainWindow):
         self.export_displayed_action.setEnabled(has_packets and self.model.visible_count > 0)
         self.follow_stream_action.setEnabled(
             packet_tools_available and not analyzing and has_selected_tcp
+        )
+        self.tcp_flow_action.setEnabled(
+            packet_tools_available and not analyzing and has_selected_tcp_flow
         )
         self.statistics_action.setEnabled(packet_tools_available)
         self.follow_stream_button.setEnabled(
@@ -1334,6 +1358,56 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(f"Saved {len(self._annotations):,} packet note(s) to {filename}")
 
+    def show_tcp_flow_graph(self) -> None:
+        if self._flow_worker is not None and self._flow_worker.isRunning():
+            return
+
+        packet = self._selected_packet
+        if packet is None:
+            return
+        key_result = tcp_flow_key_for_packet(packet)
+        if key_result is None:
+            QMessageBox.information(
+                self,
+                "TCP Flow Graph unavailable",
+                "Select an unfragmented IPv4 or IPv6 TCP packet first.",
+            )
+            return
+
+        flow_key, _direction = key_result
+        packets = tuple(self.model.iter_packets())
+        if not packets:
+            return
+
+        self.statusBar().showMessage("Building TCP Flow Graph…")
+        self._flow_worker = TCPFlowWorker(packets, flow_key, self)
+        self._flow_worker.graph_ready.connect(self._on_tcp_flow_graph_ready)
+        self._flow_worker.analysis_failed.connect(self._on_tcp_flow_graph_failed)
+        self._flow_worker.finished.connect(self._on_tcp_flow_worker_finished)
+        self._flow_worker.finished.connect(self._flow_worker.deleteLater)
+        self._update_capture_controls()
+        self._flow_worker.start()
+
+    def _on_tcp_flow_graph_ready(self, graph) -> None:
+        if graph is None:
+            QMessageBox.information(
+                self,
+                "TCP conversation not found",
+                "No packets for the selected TCP conversation were found in this capture.",
+            )
+            return
+        dialog = TCPFlowGraphDialog(graph, self)
+        dialog.exec()
+
+    def _on_tcp_flow_graph_failed(self, message: str) -> None:
+        QMessageBox.critical(self, "TCP Flow Graph failed", message)
+        self.statusBar().showMessage("TCP Flow Graph failed")
+
+    def _on_tcp_flow_worker_finished(self) -> None:
+        self._flow_worker = None
+        self._update_capture_controls()
+        self.statusBar().showMessage("TCP Flow Graph ready")
+
     def follow_tcp_stream(self) -> None:
         if self._stream_worker is not None and self._stream_worker.isRunning():
             return
@@ -1449,6 +1523,8 @@ class MainWindow(QMainWindow):
             self._live_worker.wait()
         if self._stream_worker is not None and self._stream_worker.isRunning():
             self._stream_worker.wait()
+        if self._flow_worker is not None and self._flow_worker.isRunning():
+            self._flow_worker.wait()
         event.accept()
 
     def _update_counts(self) -> None:
