@@ -9,8 +9,8 @@ def test_flow_worker_emits_graph_for_selected_conversation(qtbot):
     worker = TCPFlowWorker((packet,), key)
     received = []
     worker.graph_ready.connect(received.append)
-    qtbot.waitSignal(worker.graph_ready, timeout=3000)
-    worker.start()
+    with qtbot.waitSignal(worker.graph_ready, timeout=3000):
+        worker.start()
     worker.wait()
 
     assert len(received) == 1
