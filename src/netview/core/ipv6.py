@@ -147,7 +147,7 @@ def parse_ipv6_packet(data: bytes) -> IPv6Header:
         extensions.append(
             IPv6ExtensionHeader(
                 header_type=header_type,
-                name=EXTENSION_NAMES[header_type],
+                name=EXTENSION_NAMES.get(header_type, f"Unknown extension ({header_type})"),
                 next_header=following_header,
                 offset=offset,
                 length=length,

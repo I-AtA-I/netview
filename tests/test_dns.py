@@ -83,6 +83,25 @@ def test_dns_tcp_truncated_frame():
         parse_dns_message(framed, tcp_framed=True)
 
 
+def test_dns_name_length_uses_wire_bytes_not_decoded_escape_text():
+    raw_name = (
+        b"\\x3f" + b"\\xff" * 63
+        + b"\\x3f" + b"\\xff" * 63
+        + b"\\x3f" + b"\\xff" * 63
+        + b"\\x00"
+    )
+    message = (
+        b"\\x12\\x34\\x01\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00"
+        + raw_name
+        + b"\\x00\\x01\\x00\\x01"
+    )
+
+    dns = parse_dns_message(message)
+
+    assert dns.query_name is not None
+    assert len(dns.query_name.split(".")) == 3
+
+
 def test_dns_name_pointer_loop_is_rejected():
     message = bytearray(b"\x00" * 12)
     message[4:6] = b"\x00\x01"

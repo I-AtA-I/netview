@@ -212,7 +212,7 @@ def _tcp_diagnostics(packets: list[ProcessedPacket]) -> tuple[TCPDiagnostic, ...
         elif tcp.is_ack:
             ack_key = (endpoint_a, endpoint_b, str(direction), tcp.acknowledgment_number)
             ack_counts[ack_key] += 1
-            if ack_counts[ack_key] >= 2:
+            if ack_counts[ack_key] == 2:
                 diagnostics.append(
                     TCPDiagnostic(
                         packet_number=packet.number,

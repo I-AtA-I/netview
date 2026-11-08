@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .pipeline import ProcessedPacket
-from .streams import StreamEndpoint, TCPStreamKey, _signed_sequence_delta
+from .streams import StreamEndpoint, TCPStreamKey, signed_sequence_delta
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +97,7 @@ def build_tcp_flow_graph(
         data_sequence = (tcp.sequence_number + int(tcp.is_syn)) & 0xFFFFFFFF
         if base_sequences[direction] is None:
             base_sequences[direction] = data_sequence
-        sequence_offset = _signed_sequence_delta(
+        sequence_offset = signed_sequence_delta(
             data_sequence,
             int(base_sequences[direction]),
         )

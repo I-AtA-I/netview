@@ -126,6 +126,7 @@ def _decode_name(data: bytes, offset: int) -> tuple[str, int]:
     labels: list[str] = []
     cursor = offset
     return_offset: int | None = None
+    wire_length = 0
     visited: set[int] = set()
     jumps = 0
 
@@ -136,6 +137,8 @@ def _decode_name(data: bytes, offset: int) -> tuple[str, int]:
         length = data[cursor]
 
         if length == 0:
+            if wire_length + 1 > 255:
+                raise DNSParseError("DNS name is longer than 255 bytes")
             if return_offset is None:
                 return_offset = cursor + 1
             break
@@ -169,9 +172,11 @@ def _decode_name(data: bytes, offset: int) -> tuple[str, int]:
 
         raw_label = data[cursor + 1:cursor + 1 + length]
         labels.append(raw_label.decode("ascii", errors="backslashreplace"))
+        wire_length += 1 + len(raw_label)
         cursor += 1 + length
 
-        if sum(len(label) + 1 for label in labels) > 255:
+        # DNS name length is measured in wire octets, not decoded characters.
+        if wire_length + 1 > 255:
             raise DNSParseError("DNS name is longer than 255 bytes")
 
     return (".".join(labels) if labels else "."), return_offset

@@ -163,7 +163,7 @@ class ProcessedPacket:
 
             if ipv4.is_fragment:
                 return (
-                    f"Fragment offset={ipv4.fragment_offset * 8} "
+                    f"Fragment offset={ipv4.fragment_offset} "
                     f"MF={int(ipv4.more_fragments)}"
                 )
 

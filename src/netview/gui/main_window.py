@@ -339,7 +339,7 @@ class MainWindow(QMainWindow):
         self.clear_filter_button.clicked.connect(self.clear_filter)
         self.follow_stream_button = QPushButton("Follow TCP stream")
         self.follow_stream_button.setToolTip(
-            "Reassemble both directions of the selected IPv4/TCP conversation (Ctrl+Shift+T)."
+            "Reassemble both directions of the selected IPv4/IPv6 TCP conversation (Ctrl+Shift+T)."
         )
         self.follow_stream_button.clicked.connect(self.follow_tcp_stream)
         self.follow_stream_button.setEnabled(False)
@@ -572,8 +572,10 @@ class MainWindow(QMainWindow):
 
     def load_capture(self, filename: str | Path) -> None:
         if self._worker is not None and self._worker.isRunning():
+            self.statusBar().showMessage("A capture is already being loaded.")
             return
         if self._live_worker is not None and self._live_worker.isRunning():
+            self.statusBar().showMessage("Stop live capture before opening another capture.")
             return
 
         path = Path(filename).expanduser()
@@ -654,8 +656,7 @@ class MainWindow(QMainWindow):
         has_interfaces = self.interface_combo.count() > 0
         has_selected_tcp = (
             self._selected_packet is not None
-            and self._selected_packet.dissection.ipv4 is not None
-            and self._selected_packet.dissection.tcp is not None
+            and tcp_stream_key_for_packet(self._selected_packet) is not None
         )
         has_selected_tcp_flow = (
             self._selected_packet is not None
@@ -729,8 +730,10 @@ class MainWindow(QMainWindow):
 
     def start_live_capture(self) -> None:
         if self._worker is not None and self._worker.isRunning():
+            self.statusBar().showMessage("Wait for the current capture to finish loading.")
             return
         if self._live_worker is not None and self._live_worker.isRunning():
+            self.statusBar().showMessage("A live capture is already running.")
             return
 
         interface = self.interface_combo.currentText().strip()
@@ -1427,7 +1430,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "TCP stream unavailable",
-                "Select an IPv4/TCP packet first.",
+                "Select an unfragmented IPv4 or IPv6 TCP packet first.",
             )
             return
 

@@ -19,7 +19,15 @@ def test_actions_reenable_when_workers_have_finished(qtbot, monkeypatch):
 
     packet = SimpleNamespace(
         number=1,
-        dissection=SimpleNamespace(ipv4=object(), tcp=object()),
+        dissection=SimpleNamespace(
+            ipv4=SimpleNamespace(
+                is_fragment=False,
+                source_ip="10.0.0.1",
+                destination_ip="10.0.0.2",
+            ),
+            ipv6=None,
+            tcp=SimpleNamespace(source_port=50000, destination_port=80),
+        ),
     )
     window.model.append_packets([packet])
     window._selected_packet = packet
@@ -63,7 +71,15 @@ def test_packet_tools_remain_available_during_live_capture(qtbot, monkeypatch):
 
     packet = SimpleNamespace(
         number=1,
-        dissection=SimpleNamespace(ipv4=object(), tcp=object()),
+        dissection=SimpleNamespace(
+            ipv4=SimpleNamespace(
+                is_fragment=False,
+                source_ip="10.0.0.1",
+                destination_ip="10.0.0.2",
+            ),
+            ipv6=None,
+            tcp=SimpleNamespace(source_port=50000, destination_port=80),
+        ),
     )
     window._selected_packet = packet
     window._live_worker = RunningWorker()

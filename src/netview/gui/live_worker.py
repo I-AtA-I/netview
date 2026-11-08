@@ -84,18 +84,27 @@ class LiveCaptureWorker(QThread):
         with self._process_lock:
             process = self._process
             if process is None or process.poll() is not None:
+                was_paused = self._paused
                 self._paused = False
-                raise LiveCaptureError("The live capture process is no longer running.")
-            if not self._paused:
-                return
-            if self._stop_event.is_set() or self._reader_done.is_set():
-                raise LiveCaptureError("The live capture is already stopping.")
+                process_stopped = True
+            else:
+                process_stopped = False
+                was_paused = False
+                if not self._paused:
+                    return
+                if self._stop_event.is_set() or self._reader_done.is_set():
+                    raise LiveCaptureError("The live capture is already stopping.")
 
-            try:
-                process.send_signal(signal.SIGCONT)
-            except OSError as exc:
-                raise LiveCaptureError(f"Could not resume dumpcap: {exc}") from exc
-            self._paused = False
+                try:
+                    process.send_signal(signal.SIGCONT)
+                except OSError as exc:
+                    raise LiveCaptureError(f"Could not resume dumpcap: {exc}") from exc
+                self._paused = False
+
+        if process_stopped:
+            if was_paused:
+                self.paused_changed.emit(False)
+            raise LiveCaptureError("The live capture process is no longer running.")
 
         self.paused_changed.emit(False)
 

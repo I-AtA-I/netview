@@ -90,7 +90,7 @@ class TCPStreamDialog(QDialog):
             lines.append("\nNo TCP application payload was captured in this direction.")
             return "\n".join(lines)
 
-        gaps_by_start = {gap.start_offset: gap for gap in direction.gaps}
+        gaps_by_start = {gap.end_offset: gap for gap in direction.gaps}
         for index, chunk in enumerate(direction.chunks):
             if index:
                 gap = gaps_by_start.get(chunk.sequence_offset)

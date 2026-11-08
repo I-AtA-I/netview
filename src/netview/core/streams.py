@@ -98,7 +98,7 @@ class _DirectionBuilder:
         if self.base_sequence is None:
             self.base_sequence = data_sequence
 
-        offset = _signed_sequence_delta(data_sequence, self.base_sequence)
+        offset = signed_sequence_delta(data_sequence, self.base_sequence)
 
         if truncated:
             self.truncated_packet_numbers.append(packet_number)
@@ -187,14 +187,22 @@ class _StreamBuilder:
 
     def add(self, packet: ProcessedPacket, direction_index: int) -> None:
         ipv4 = packet.dissection.ipv4
+        ipv6 = packet.dissection.ipv6
         tcp = packet.dissection.tcp
-        if ipv4 is None or tcp is None:
+        if tcp is None or (ipv4 is None and ipv6 is None):
             return
 
         payload = packet.dissection.payload
+        if ipv4 is not None:
+            network_header_length = ipv4.header_length
+            network_total_length = ipv4.total_length
+        else:
+            # upper_layer_offset includes the IPv6 base and extension headers.
+            network_header_length = ipv6.upper_layer_offset
+            network_total_length = ipv6.total_length
         expected_payload_length = max(
             0,
-            ipv4.total_length - ipv4.header_length - tcp.header_length,
+            network_total_length - network_header_length - tcp.header_length,
         )
         truncated = len(payload) < expected_payload_length
 
@@ -226,22 +234,25 @@ class _StreamBuilder:
         )
 
 
-def _signed_sequence_delta(sequence: int, reference: int) -> int:
+def signed_sequence_delta(sequence: int, reference: int) -> int:
     """Return the nearest signed 32-bit distance from reference to sequence."""
     return ((sequence - reference + _SEQUENCE_HALF) % _SEQUENCE_MODULUS) - _SEQUENCE_HALF
 
 
 def tcp_stream_key_for_packet(packet: ProcessedPacket) -> tuple[TCPStreamKey, int] | None:
-    """Return the canonical IPv4/TCP conversation key and packet direction."""
+    """Return the canonical IPv4/IPv6 TCP conversation key and packet direction."""
     ipv4 = packet.dissection.ipv4
+    ipv6 = packet.dissection.ipv6
     tcp = packet.dissection.tcp
-    if ipv4 is None or tcp is None or ipv4.is_fragment:
-        # The first IP fragment can contain a TCP header but not the full
-        # segment. Wait for IP fragment reassembly before using it as a stream.
+    if tcp is None or (ipv4 is None and ipv6 is None):
+        return None
+    ip = ipv4 or ipv6
+    if ip.is_fragment:
+        # Wait for IP fragment reassembly before using an incomplete segment.
         return None
 
-    source = StreamEndpoint(ipv4.source_ip, tcp.source_port)
-    destination = StreamEndpoint(ipv4.destination_ip, tcp.destination_port)
+    source = StreamEndpoint(ip.source_ip, tcp.source_port)
+    destination = StreamEndpoint(ip.destination_ip, tcp.destination_port)
 
     if source <= destination:
         return TCPStreamKey(source, destination), 0

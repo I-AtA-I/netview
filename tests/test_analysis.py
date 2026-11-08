@@ -96,8 +96,8 @@ def test_analysis_reports_repeated_ack_without_claiming_packet_loss():
 
     assert [item.category for item in result.tcp_diagnostics] == [
         "Repeated ACK",
-        "Repeated ACK",
     ]
+    assert result.tcp_diagnostics[0].packet_number == 2
 
 
 def test_analysis_builds_timeline_and_endpoint_counts():

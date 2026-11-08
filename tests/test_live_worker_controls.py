@@ -79,6 +79,24 @@ def test_pause_requires_a_running_capture_process():
         worker.pause()
 
 
+def test_resume_of_dead_paused_process_resets_ui_state():
+    class DeadProcess(FakeProcess):
+        def poll(self):
+            return 1
+
+    worker = LiveCaptureWorker("eth0")
+    worker._process = DeadProcess()
+    worker._paused = True
+    states = []
+    worker.paused_changed.connect(states.append)
+
+    with pytest.raises(LiveCaptureError, match="no longer running"):
+        worker.resume()
+
+    assert not worker.is_paused
+    assert states == [False]
+
+
 def test_capture_cannot_be_paused_after_reader_finishes():
     worker = LiveCaptureWorker("eth0")
     attach_running_process(worker)
