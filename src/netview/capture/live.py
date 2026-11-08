@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import struct
 import subprocess
 from collections.abc import Iterator
+from pathlib import Path
 from typing import BinaryIO
 
 from netview.core.models import PacketRecord
@@ -23,7 +25,34 @@ _PCAP_MAGICS = {
 _MAX_CAPTURED_PACKET = 64 * 1024 * 1024
 
 
-def _read_exact(stream: BinaryIO, size: int, *, allow_clean_eof: bool = False) -> bytes | None:
+def find_dumpcap() -> str | None:
+    """Find dumpcap in PATH or standard Wireshark installation paths."""
+    executable = shutil.which("dumpcap") or shutil.which("dumpcap.exe")
+    if executable is not None:
+        return executable
+
+    if os.name != "nt":
+        return None
+
+    install_dirs = [
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
+    ]
+
+    for directory in install_dirs:
+        candidate = directory / "Wireshark" / "dumpcap.exe"
+        if candidate.is_file():
+            return str(candidate)
+
+    return None
+
+
+def _read_exact(
+    stream: BinaryIO,
+    size: int,
+    *,
+    allow_clean_eof: bool = False,
+) -> bytes | None:
     chunks: list[bytes] = []
     remaining = size
 
@@ -104,27 +133,48 @@ def iter_pcap_stream(stream: BinaryIO) -> Iterator[PacketRecord]:
             ) from exc
 
 
-def _parse_dumpcap_interfaces(output: str) -> list[str]:
-    interfaces: list[str] = []
+def _parse_dumpcap_interface_details(output: str) -> list[tuple[str, str]]:
+    interfaces: list[tuple[str, str]] = []
+
     for line in output.splitlines():
-        match = re.match(r"^\s*\d+\.\s+(\S+)", line)
-        if match:
-            name = match.group(1)
-            if name not in interfaces:
-                interfaces.append(name)
+        match = re.match(r"^\s*\d+\.\s+(\S+)(?:\s+\((.*?)\))?\s*$", line)
+        if not match:
+            continue
+
+        identifier = match.group(1)
+        description = match.group(2)
+
+        if identifier.casefold() == r"\device\npf_loopback":
+            display_name = "Loopback"
+        elif identifier.casefold().startswith(r"\device\npf_") and description:
+            display_name = description
+        else:
+            display_name = identifier
+
+        if not any(existing_id == identifier for existing_id, _ in interfaces):
+            interfaces.append((identifier, display_name))
 
     return sorted(
         interfaces,
-        key=lambda name: (
-            name.lower() in {"lo", "lo0", "loopback"},
-            name.lower(),
+        key=lambda item: (
+            item[0].lower() in {"lo", "lo0", "loopback"}
+            or "loopback" in item[0].lower()
+            or "loopback" in item[1].lower(),
+            item[1].lower(),
         ),
     )
 
 
-def list_interfaces() -> list[str]:
-    """List interfaces through dumpcap, the privilege-separated capture helper."""
-    executable = shutil.which("dumpcap")
+def _parse_dumpcap_interfaces(output: str) -> list[str]:
+    return [
+        identifier
+        for identifier, _display_name in _parse_dumpcap_interface_details(output)
+    ]
+
+
+def list_interface_details() -> list[tuple[str, str]]:
+    """List interface identifiers together with human-readable display names."""
+    executable = find_dumpcap()
     if executable is None:
         raise LiveCaptureError(
             "dumpcap was not found. On Arch Linux, install it with: "
@@ -137,6 +187,8 @@ def list_interfaces() -> list[str]:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -148,7 +200,16 @@ def list_interfaces() -> list[str]:
             detail or f"dumpcap -D exited with status {result.returncode}"
         )
 
-    interfaces = _parse_dumpcap_interfaces(result.stdout)
+    interfaces = _parse_dumpcap_interface_details(result.stdout)
     if not interfaces and result.stderr.strip():
         raise LiveCaptureError(result.stderr.strip())
+
     return interfaces
+
+
+def list_interfaces() -> list[str]:
+    """List interface identifiers through dumpcap."""
+    return [
+        identifier
+        for identifier, _display_name in list_interface_details()
+    ]
