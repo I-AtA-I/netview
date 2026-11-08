@@ -13,6 +13,9 @@ NetView is a desktop network protocol analyzer built with Python and PySide6. It
 - Display packet metadata, protocol details and a raw hexadecimal/ASCII view with field-to-byte highlighting for decoded Ethernet, ARP, IPv4/IPv6, TCP, UDP and ICMP fields.
 - Search packet numbers, endpoints, protocols, packet summaries and parsed DNS/HTTP/TLS metadata with Ctrl+F.
 - Add packet bookmarks and notes; notes can be saved to a JSON sidecar next to a capture and are loaded again when that capture is opened.
+- Open a packet context menu for quick protocol/address/port filters, Follow TCP Stream, packet notes and clipboard copies.
+- Export all or displayed packets to classic PCAP, multi-interface PCAPNG or packet-metadata CSV.
+- Save and manage reusable display filters from Edit → Saved filters; filters are stored in the user's NetView configuration directory.
 - Review capture-wide protocol distribution, top endpoints, TCP/UDP conversations, bytes, durations and a packet-rate timeline in the Analysis Center (Ctrl+Shift+S).
 - Inspect TCP sequence overlaps, possible retransmissions, out-of-order observations and repeated ACKs using capture-based heuristics.
 - Browse consolidated DNS, HTTP/1.x, TLS handshake metadata and dissection warnings, then jump from an event or conversation to its packet.
@@ -195,3 +198,10 @@ TCP anomaly labels are heuristic observations from the captured sequence and ACK
 ### Pause and resume live capture
 
 On Linux and other POSIX systems, use **Capture → Pause live capture** or the sidebar button to temporarily suspend the running `dumpcap` process. Resume with the same control. The capture session, packet list, packet numbering and selected interface are retained; the interval while paused is simply not captured. **Stop capture** still ends the session. Pausing and resuming does not restart `dumpcap`.
+
+
+### Packet workflow
+
+Right-click a packet to apply a protocol, endpoint, port or frame-number filter; follow an IPv4/TCP stream; edit its note; or copy packet metadata and raw bytes. The File → Export packets submenu exports either the complete capture or only the rows currently displayed after filtering. Classic PCAP requires a single link type; use PCAPNG when a capture contains more than one link type. CSV contains packet metadata, not raw payload bytes.
+
+Saved display filters are managed from Edit → Saved filters. The filter manager validates expressions before saving them and stores them in the NetView user configuration directory (under .config/netview, or the directory selected by XDG_CONFIG_HOME).

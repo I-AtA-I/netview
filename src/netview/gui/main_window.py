@@ -3,6 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QFrame,
     QComboBox,
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
@@ -24,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from netview.capture import LiveCaptureError, list_interfaces
+from netview.capture.export import export_packets as write_export
 from netview.core.dissector import ETHERTYPE_NAMES
 from netview.core.tls import cipher_suite_name, tls_version_name
 from netview.core.pipeline import ProcessedPacket
@@ -34,6 +37,7 @@ from netview.gui.table_model import PacketTableModel
 from .analysis_dialog import AnalysisDialog
 from .annotations import annotation_sidecar_path, load_annotations, save_annotations
 from .live_worker import LiveCaptureWorker
+from .filter_manager import FilterManagerDialog
 from .stream_dialog import TCPStreamDialog
 from .stream_worker import TCPStreamWorker
 from .worker import CaptureLoadWorker
@@ -152,12 +156,27 @@ class MainWindow(QMainWindow):
         self.save_annotations_action.setShortcut(QKeySequence("Ctrl+Shift+E"))
         self.save_annotations_action.triggered.connect(self.save_packet_notes)
         file_menu.addAction(self.save_annotations_action)
+        export_menu = file_menu.addMenu("Export packets")
+        self.export_all_action = QAction("All packets…", self)
+        self.export_all_action.triggered.connect(
+            lambda: self.export_capture_packets(displayed_only=False)
+        )
+        export_menu.addAction(self.export_all_action)
+        self.export_displayed_action = QAction("Displayed packets…", self)
+        self.export_displayed_action.triggered.connect(
+            lambda: self.export_capture_packets(displayed_only=True)
+        )
+        export_menu.addAction(self.export_displayed_action)
 
         edit_menu = self.menuBar().addMenu("&Edit")
         self.find_action = QAction("Find packet…", self)
         self.find_action.setShortcut(QKeySequence("Ctrl+F"))
         self.find_action.triggered.connect(self.find_packet)
         edit_menu.addAction(self.find_action)
+        edit_menu.addSeparator()
+        self.manage_filters_action = QAction("Saved filters…", self)
+        self.manage_filters_action.triggered.connect(self.open_filter_manager)
+        edit_menu.addAction(self.manage_filters_action)
 
         capture_menu = self.menuBar().addMenu("&Capture")
         self.start_capture_action = QAction("Start live capture", self)
@@ -334,6 +353,10 @@ class MainWindow(QMainWindow):
         self.packet_table.setAlternatingRowColors(True)
         self.packet_table.setShowGrid(False)
         self.packet_table.setSortingEnabled(False)
+        self.packet_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.packet_table.customContextMenuRequested.connect(
+            self.show_packet_context_menu
+        )
         self.packet_table.verticalHeader().setVisible(False)
         self.packet_table.horizontalHeader().setStretchLastSection(True)
         self.packet_table.setColumnWidth(0, 64)
@@ -387,6 +410,140 @@ class MainWindow(QMainWindow):
         self.count_status.setStyleSheet("color: #9eb2bd; padding: 0 8px;")
         self.statusBar().addPermanentWidget(self.count_status)
         self.statusBar().showMessage("Ready — open a PCAP or PCAPNG file")
+
+    def open_filter_manager(self) -> None:
+        dialog = FilterManagerDialog(self.filter_input.text(), self)
+        dialog.filter_applied.connect(self._set_filter_expression)
+        dialog.exec()
+
+    def _set_filter_expression(self, expression: str) -> None:
+        self.filter_input.setText(expression)
+        self.apply_filter()
+
+    def _copy_text(self, value: str) -> None:
+        QApplication.clipboard().setText(value)
+
+    def _build_packet_context_menu(self, packet: ProcessedPacket) -> QMenu:
+        menu = QMenu(self)
+        filter_menu = menu.addMenu("Apply as Filter")
+        choices: list[tuple[str, str]] = [
+            ("This packet number", f"frame.number == {packet.number}"),
+        ]
+        dissection = packet.dissection
+        if dissection.ipv4 is not None:
+            choices.extend((
+                ("IPv4 source", f"ip.src == {dissection.ipv4.source_ip}"),
+                ("IPv4 destination", f"ip.dst == {dissection.ipv4.destination_ip}"),
+            ))
+        if dissection.ipv6 is not None:
+            choices.extend((
+                ("IPv6 source", f"ipv6.src == {dissection.ipv6.source_ip}"),
+                ("IPv6 destination", f"ipv6.dst == {dissection.ipv6.destination_ip}"),
+            ))
+        if dissection.ethernet is not None:
+            choices.extend((
+                ("Ethernet source", f"eth.src == {dissection.ethernet.source_mac}"),
+                ("Ethernet destination", f"eth.dst == {dissection.ethernet.destination_mac}"),
+            ))
+        if dissection.tcp is not None:
+            tcp = dissection.tcp
+            choices.extend((
+                ("TCP source port", f"tcp.srcport == {tcp.source_port}"),
+                ("TCP destination port", f"tcp.dstport == {tcp.destination_port}"),
+                ("Either TCP source port", f"tcp.port == {tcp.source_port}"),
+                ("Either TCP destination port", f"tcp.port == {tcp.destination_port}"),
+            ))
+        if dissection.udp is not None:
+            udp = dissection.udp
+            choices.extend((
+                ("UDP source port", f"udp.srcport == {udp.source_port}"),
+                ("UDP destination port", f"udp.dstport == {udp.destination_port}"),
+                ("Either UDP source port", f"udp.port == {udp.source_port}"),
+                ("Either UDP destination port", f"udp.port == {udp.destination_port}"),
+            ))
+        protocol_filter = packet.protocol.casefold()
+        if protocol_filter in {
+            "arp", "ipv4", "ipv6", "tcp", "udp", "icmp", "icmpv6",
+            "dns", "mdns", "llmnr", "http", "tls",
+        }:
+            choices.insert(0, ("Protocol: " + packet.protocol, protocol_filter))
+        for label, expression in choices:
+            action = filter_menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, value=expression: self._set_filter_expression(value)
+            )
+
+        if tcp_stream_key_for_packet(packet) is not None:
+            menu.addSeparator()
+            menu.addAction("Follow TCP Stream", self.follow_tcp_stream)
+        menu.addSeparator()
+        menu.addAction("Add / edit packet note…", self.mark_packet_note)
+        menu.addSeparator()
+        menu.addAction("Copy source", lambda: self._copy_text(packet.source))
+        menu.addAction("Copy destination", lambda: self._copy_text(packet.destination))
+        menu.addAction(
+            "Copy packet summary",
+            lambda: self._copy_text(
+                f"#{packet.number} {packet.source} → {packet.destination} "
+                f"{packet.protocol} {packet.info}"
+            ),
+        )
+        menu.addAction(
+            "Copy packet bytes (hex)",
+            lambda: self._copy_text(packet.record.data.hex(" ")),
+        )
+        return menu
+
+    def show_packet_context_menu(self, position) -> None:
+        index = self.packet_table.indexAt(position)
+        if not index.isValid():
+            return
+        self.packet_table.setCurrentIndex(index)
+        packet = self.model.packet_at(index.row())
+        if packet is None:
+            return
+        menu = self._build_packet_context_menu(packet)
+        menu.exec(self.packet_table.viewport().mapToGlobal(position))
+
+    def export_capture_packets(self, displayed_only: bool) -> None:
+        if displayed_only:
+            packets = tuple(
+                packet
+                for row in range(self.model.visible_count)
+                if (packet := self.model.packet_at(row)) is not None
+            )
+            scope = "displayed"
+        else:
+            packets = tuple(self.model.iter_packets())
+            scope = "all"
+        if not packets:
+            QMessageBox.information(self, "Nothing to export", "There are no packets in this selection.")
+            return
+
+        filename, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            f"Export {scope} packets",
+            str(Path.home() / "netview-export.pcapng"),
+            "PCAPNG capture (*.pcapng);;Classic PCAP capture (*.pcap);;CSV table (*.csv)",
+        )
+        if not filename:
+            return
+        destination = Path(filename).expanduser()
+        if not destination.suffix:
+            suffix = ".csv" if "CSV" in selected_filter else (
+                ".pcap" if "Classic PCAP" in selected_filter else ".pcapng"
+            )
+            destination = destination.with_suffix(suffix)
+
+        try:
+            write_export(destination, packets)
+        except (OSError, TypeError, ValueError) as exc:
+            QMessageBox.critical(self, "Packet export failed", str(exc))
+            return
+
+        self.statusBar().showMessage(
+            f"Exported {len(packets):,} {scope} packet(s) to {destination}"
+        )
 
     def open_capture_dialog(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -500,6 +657,9 @@ class MainWindow(QMainWindow):
         self.stop_capture_action.setEnabled(can_stop)
         self.open_action.setEnabled(idle)
         self.close_action.setEnabled(idle and self.model.total_count > 0)
+        has_packets = self.model.total_count > 0 and not loading
+        self.export_all_action.setEnabled(has_packets)
+        self.export_displayed_action.setEnabled(has_packets and self.model.visible_count > 0)
         self.follow_stream_action.setEnabled(
             packet_tools_available and not analyzing and has_selected_tcp
         )
