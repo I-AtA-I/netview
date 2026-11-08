@@ -23,6 +23,7 @@ class PacketTableModel(QAbstractTableModel):
         self._packets: list[ProcessedPacket] = []
         self._visible: list[ProcessedPacket] = []
         self._filter: CompiledFilter | None = None
+        self._annotations: dict[int, str] = {}
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         if parent.isValid():
@@ -60,7 +61,7 @@ class PacketTableModel(QAbstractTableModel):
                 packet.destination,
                 packet.protocol,
                 packet.length,
-                packet.info,
+                packet.info + ("   ★" if packet.number in self._annotations else ""),
             )
             if 0 <= index.column() < len(values):
                 return str(values[index.column()])
@@ -87,12 +88,14 @@ class PacketTableModel(QAbstractTableModel):
             return font
 
         if role == Qt.ItemDataRole.ToolTipRole:
-            return (
+            note = self._annotations.get(packet.number)
+            tooltip = (
                 f"Packet {packet.number}\n"
                 f"Captured: {packet.captured_length} bytes\n"
                 f"Original: {packet.length} bytes\n"
                 f"Link type: {packet.record.link_type}"
             )
+            return f"{tooltip}\n\nNote: {note}" if note else tooltip
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
             if index.column() in (0, 5):
@@ -156,6 +159,24 @@ class PacketTableModel(QAbstractTableModel):
     def iter_packets(self):
         """Iterate over all captured packets, regardless of display filter."""
         return iter(self._packets)
+
+    def set_annotations(self, annotations: dict[int, str]) -> None:
+        self._annotations = dict(annotations)
+        if self._visible:
+            self.dataChanged.emit(
+                self.index(0, 6),
+                self.index(len(self._visible) - 1, 6),
+                [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole],
+            )
+
+    def annotation_for(self, packet_number: int) -> str | None:
+        return self._annotations.get(packet_number)
+
+    def row_for_packet_number(self, packet_number: int) -> int:
+        for row, packet in enumerate(self._visible):
+            if packet.number == packet_number:
+                return row
+        return -1
 
     @property
     def total_count(self) -> int:
