@@ -136,6 +136,7 @@ class MainWindow(QMainWindow):
         self._hex_data_length = 0
         self._stream_worker: TCPStreamWorker | None = None
         self._flow_worker: TCPFlowWorker | None = None
+        self._flow_failed = False
 
         self._build_actions()
         self._build_ui()
@@ -1380,13 +1381,14 @@ class MainWindow(QMainWindow):
             return
 
         self.statusBar().showMessage("Building TCP Flow Graph…")
+        self._flow_failed = False
         self._flow_worker = TCPFlowWorker(packets, flow_key, self)
         self._flow_worker.graph_ready.connect(self._on_tcp_flow_graph_ready)
         self._flow_worker.analysis_failed.connect(self._on_tcp_flow_graph_failed)
         self._flow_worker.finished.connect(self._on_tcp_flow_worker_finished)
         self._flow_worker.finished.connect(self._flow_worker.deleteLater)
-        self._update_capture_controls()
         self._flow_worker.start()
+        self._update_capture_controls()
 
     def _on_tcp_flow_graph_ready(self, graph) -> None:
         if graph is None:
@@ -1400,13 +1402,17 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _on_tcp_flow_graph_failed(self, message: str) -> None:
+        self._flow_failed = True
         QMessageBox.critical(self, "TCP Flow Graph failed", message)
         self.statusBar().showMessage("TCP Flow Graph failed")
 
     def _on_tcp_flow_worker_finished(self) -> None:
         self._flow_worker = None
         self._update_capture_controls()
-        self.statusBar().showMessage("TCP Flow Graph ready")
+        if self._flow_failed:
+            self.statusBar().showMessage("TCP Flow Graph failed")
+        else:
+            self.statusBar().showMessage("TCP Flow Graph ready")
 
     def follow_tcp_stream(self) -> None:
         if self._stream_worker is not None and self._stream_worker.isRunning():
