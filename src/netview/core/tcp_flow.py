@@ -1,10 +1,41 @@
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .pipeline import ProcessedPacket
 from .streams import StreamEndpoint, TCPStreamKey, signed_sequence_delta
+
+
+def _record_sequence_range(
+    ranges: list[tuple[int, int]],
+    start: int,
+    end: int,
+) -> bool:
+    """Record a range in a sorted, merged interval list and report overlap."""
+    index = bisect_left(ranges, (start, end))
+    overlaps = index > 0 and ranges[index - 1][1] > start
+
+    scan = index
+    while scan < len(ranges) and ranges[scan][0] < end:
+        if ranges[scan][1] > start:
+            overlaps = True
+        scan += 1
+
+    merge_start = index
+    if index > 0 and ranges[index - 1][1] >= start:
+        merge_start = index - 1
+        start = ranges[merge_start][0]
+        end = max(end, ranges[merge_start][1])
+
+    merge_end = merge_start
+    while merge_end < len(ranges) and ranges[merge_end][0] <= end:
+        end = max(end, ranges[merge_end][1])
+        merge_end += 1
+
+    ranges[merge_start:merge_end] = [(start, end)]
+    return overlaps
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,11 +137,11 @@ def build_tcp_flow_graph(
         possible_overlap = False
         if payload_length:
             end_offset = sequence_offset + payload_length
-            possible_overlap = any(
-                sequence_offset < previous_end and end_offset > previous_start
-                for previous_start, previous_end in observed_ranges[direction]
+            possible_overlap = _record_sequence_range(
+                observed_ranges[direction],
+                sequence_offset,
+                end_offset,
             )
-            observed_ranges[direction].append((sequence_offset, end_offset))
 
         ip = packet.dissection.ipv4 or packet.dissection.ipv6
         truncated = (

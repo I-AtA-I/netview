@@ -137,6 +137,26 @@ def test_flow_graph_supports_ipv6_tcp():
     assert graph.duration_seconds == 0.5
 
 
+def test_flow_graph_overlap_index_handles_out_of_order_and_adjacent_ranges():
+    packets = [
+        make_ipv4_tcp(1, sequence=100, payload=b"abcdefghij"),
+        make_ipv4_tcp(2, sequence=120, payload=b"abcdefghij"),
+        make_ipv4_tcp(3, sequence=110, payload=b"12345"),
+        make_ipv4_tcp(4, sequence=114, payload=b"1234567"),
+    ]
+    key, _ = tcp_flow_key_for_packet(packets[0])
+
+    graph = build_tcp_flow_graph(packets, key)
+
+    assert graph is not None
+    assert [event.possible_overlap for event in graph.events] == [
+        False,
+        False,
+        False,
+        True,
+    ]
+
+
 def test_flow_graph_does_not_mix_other_tcp_conversations():
     first = make_ipv4_tcp(1)
     other = make_ipv4_tcp(2, destination_port=80)
