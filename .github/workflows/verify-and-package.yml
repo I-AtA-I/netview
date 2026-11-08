@@ -19,6 +19,11 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Install Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -37,6 +42,24 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: pytest -q
+
+      - name: Smoke-test the desktop UI
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          from PySide6.QtWidgets import QApplication
+          from netview.gui.analysis_dialog import AnalysisDialog
+          from netview.gui.main_window import MainWindow
+
+          app = QApplication([])
+          window = MainWindow()
+          dialog = AnalysisDialog([])
+          assert window.windowTitle().startswith("NetView")
+          assert dialog.windowTitle().endswith("Analysis center")
+          dialog.close()
+          window.close()
+          PY
 
       - name: Create full source archive
         run: |
