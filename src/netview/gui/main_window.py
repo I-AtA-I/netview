@@ -37,88 +37,69 @@ from .worker import CaptureLoadWorker
 
 APP_STYLE = """
 QMainWindow, QWidget {
-    background: #15131b;
-    color: #e7e2ed;
+    background: #101820;
+    color: #e5edf2;
     font-family: "Inter", "Noto Sans", sans-serif;
     font-size: 10pt;
 }
 QMenuBar, QMenu {
-    background: #1c1923;
-    color: #e7e2ed;
-}
-QMenuBar::item:selected, QMenu::item:selected {
-    background: #393047;
-}
-QToolBar {
-    background: #1c1923;
+    background: #14212a;
+    color: #dce7ec;
     border: none;
-    spacing: 8px;
-    padding: 7px;
 }
+QMenuBar::item { padding: 7px 11px; }
+QMenuBar::item:selected, QMenu::item:selected { background: #20343d; color: #72e0d0; }
 QLineEdit, QPlainTextEdit, QTreeWidget, QTableView {
-    background: #100e15;
-    color: #e7e2ed;
-    border: 1px solid #302a3a;
-    border-radius: 5px;
-    selection-background-color: #49385f;
-    selection-color: #ffffff;
+    background: #121e27;
+    color: #dce7ec;
+    border: 1px solid #293943;
+    border-radius: 7px;
+    selection-background-color: #24504f;
+    selection-color: #f4ffff;
 }
-QLineEdit {
-    padding: 8px 10px;
-}
+QLineEdit { padding: 9px 12px; }
 QLineEdit:focus, QPlainTextEdit:focus, QTreeWidget:focus, QTableView:focus {
-    border: 1px solid #9275b8;
+    border: 1px solid #45bfae;
 }
 QPushButton {
-    background: #30283b;
-    color: #eee8f6;
-    border: 1px solid #493d59;
-    border-radius: 5px;
-    padding: 7px 13px;
-}
-QPushButton:hover {
-    background: #40344f;
-}
-QPushButton:pressed {
-    background: #514064;
-}
-QPushButton:disabled {
-    color: #77717f;
-    background: #211e27;
-}
-QHeaderView::section {
-    background: #211d29;
-    color: #c9bfd7;
-    border: none;
-    border-right: 1px solid #302a3a;
-    border-bottom: 1px solid #393142;
-    padding: 8px 7px;
+    background: #1c3039;
+    color: #dce7ec;
+    border: 1px solid #344b55;
+    border-radius: 7px;
+    padding: 8px 14px;
     font-weight: 600;
 }
-QTableView {
-    gridline-color: #282330;
-    alternate-background-color: #17141e;
+QPushButton:hover { background: #27434b; border-color: #4d8d87; }
+QPushButton:pressed { background: #1c4b4b; }
+QPushButton:disabled { color: #657781; background: #17232b; border-color: #26343c; }
+QHeaderView::section {
+    background: #1b2a34;
+    color: #9eb2bd;
+    border: none;
+    border-right: 1px solid #293943;
+    border-bottom: 1px solid #344650;
+    padding: 10px 8px;
+    font-weight: 700;
 }
-QTableView::item {
-    padding: 5px;
-}
-QTreeWidget::item {
-    padding: 3px;
-}
+QTableView { gridline-color: #22323b; alternate-background-color: #16232c; }
+QTableView::item { padding: 6px; }
+QTreeWidget::item { padding: 4px; }
 QStatusBar {
-    background: #1c1923;
-    color: #aaa1b5;
-    border-top: 1px solid #302a3a;
+    background: #14212a;
+    color: #91a5b2;
+    border-top: 1px solid #293943;
 }
-QSplitter::handle {
-    background: #302a3a;
+QSplitter::handle { background: #293943; }
+QSplitter::handle:horizontal { width: 5px; }
+QSplitter::handle:vertical { height: 5px; }
+QComboBox {
+    background: #17252e;
+    color: #dce7ec;
+    border: 1px solid #344b55;
+    border-radius: 7px;
+    padding: 8px 10px;
 }
-QSplitter::handle:horizontal {
-    width: 4px;
-}
-QSplitter::handle:vertical {
-    height: 4px;
-}
+QComboBox QAbstractItemView { background: #17252e; color: #dce7ec; selection-background-color: #24504f; }
 """
 
 
@@ -195,16 +176,16 @@ class MainWindow(QMainWindow):
 
         heading = QHBoxLayout()
         title = QLabel("NetView")
-        title.setStyleSheet("font-size: 18pt; font-weight: 700; color: #f0eaf8;")
+        title.setStyleSheet("font-size: 18pt; font-weight: 700; color: #f0f8fa;")
         subtitle = QLabel("NETWORK PROTOCOL ANALYZER")
-        subtitle.setStyleSheet("font-size: 8pt; letter-spacing: 1px; color: #9b8eaa;")
+        subtitle.setStyleSheet("font-size: 8pt; letter-spacing: 1px; color: #91a5b2;")
         heading.addWidget(title)
         heading.addSpacing(10)
         heading.addWidget(subtitle)
         heading.addStretch(1)
 
         self.file_label = QLabel("No capture loaded")
-        self.file_label.setStyleSheet("color: #a99db7;")
+        self.file_label.setStyleSheet("color: #9eb2bd;")
         self.file_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         heading.addWidget(self.file_label)
         root.addLayout(heading)
@@ -212,7 +193,7 @@ class MainWindow(QMainWindow):
         capture_row = QHBoxLayout()
         capture_row.setSpacing(8)
         capture_label = QLabel("Interface")
-        capture_label.setStyleSheet("color: #bdb2ca; font-weight: 600;")
+        capture_label.setStyleSheet("color: #a9bac3; font-weight: 600;")
         self.interface_combo = QComboBox()
         self.interface_combo.setMinimumWidth(220)
         self.interface_combo.setToolTip(
@@ -225,7 +206,7 @@ class MainWindow(QMainWindow):
         self.stop_capture_button = QPushButton("Stop")
         self.stop_capture_button.clicked.connect(self.stop_live_capture)
         self.capture_state_label = QLabel("Live capture stopped · promiscuous mode off")
-        self.capture_state_label.setStyleSheet("color: #847a90; font-size: 9pt;")
+        self.capture_state_label.setStyleSheet("color: #8297a4; font-size: 9pt;")
         capture_row.addWidget(capture_label)
         capture_row.addWidget(self.interface_combo)
         capture_row.addWidget(self.refresh_interfaces_button)
@@ -236,7 +217,7 @@ class MainWindow(QMainWindow):
 
         filter_row = QHBoxLayout()
         filter_label = QLabel("Display filter")
-        filter_label.setStyleSheet("color: #bdb2ca; font-weight: 600;")
+        filter_label.setStyleSheet("color: #a9bac3; font-weight: 600;")
         self.filter_input = QLineEdit()
         self.filter_input.setPlaceholderText(
             "e.g. tcp.port == 443 or dns.qry.name == example.com"
@@ -260,7 +241,7 @@ class MainWindow(QMainWindow):
         root.addLayout(filter_row)
 
         self.filter_status = QLabel("Filters: dns, http, tls, arp, ipv6, tcp, udp, icmp, app metadata, addresses, ports")
-        self.filter_status.setStyleSheet("color: #847a90; font-size: 9pt;")
+        self.filter_status.setStyleSheet("color: #8297a4; font-size: 9pt;")
         root.addWidget(self.filter_status)
 
         self.packet_table = QTableView()
@@ -309,7 +290,7 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central)
         self.count_status = QLabel("0 displayed / 0 total")
-        self.count_status.setStyleSheet("color: #b7a9c7; padding: 0 8px;")
+        self.count_status.setStyleSheet("color: #9eb2bd; padding: 0 8px;")
         self.statusBar().addPermanentWidget(self.count_status)
         self.statusBar().showMessage("Ready — open a PCAP or PCAPNG file")
 
@@ -340,7 +321,7 @@ class MainWindow(QMainWindow):
         self.clear_filter_button.setEnabled(False)
         self.open_action.setEnabled(False)
         self.close_action.setEnabled(False)
-        self.filter_status.setStyleSheet("color: #847a90; font-size: 9pt;")
+        self.filter_status.setStyleSheet("color: #8297a4; font-size: 9pt;")
         self.filter_status.setText("Loading capture…")
         self.statusBar().showMessage(f"Loading {path}…")
 
@@ -451,7 +432,7 @@ class MainWindow(QMainWindow):
         self._live_interface = interface
         self._live_capture_error = False
         self.file_label.setText(f"Live capture · {interface}")
-        self.filter_status.setStyleSheet("color: #9b8eaa; font-size: 9pt;")
+        self.filter_status.setStyleSheet("color: #91a5b2; font-size: 9pt;")
         self.filter_status.setText("Capturing live packets. Enter a display filter or leave it empty.")
 
         self._live_worker = LiveCaptureWorker(interface, self)
@@ -518,7 +499,7 @@ class MainWindow(QMainWindow):
             return
 
         self.filter_input.setStyleSheet("")
-        self.filter_status.setStyleSheet("color: #9b8eaa; font-size: 9pt;")
+        self.filter_status.setStyleSheet("color: #91a5b2; font-size: 9pt;")
         if expression.strip():
             self.filter_status.setText(
                 f"Filter matched {visible:,} of {self.model.total_count:,} packets"
@@ -545,7 +526,7 @@ class MainWindow(QMainWindow):
         self.filter_status.setText(
             "Filters: arp, ipv6, tcp, udp, icmp, IP addresses, ports, flags, frame length"
         )
-        self.filter_status.setStyleSheet("color: #847a90; font-size: 9pt;")
+        self.filter_status.setStyleSheet("color: #8297a4; font-size: 9pt;")
         self._clear_packet_details()
         self._set_loading_state(False)
         self.close_action.setEnabled(False)
