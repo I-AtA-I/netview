@@ -464,9 +464,12 @@ class MainWindow(QMainWindow):
         self._update_capture_controls()
 
     def _update_capture_controls(self) -> None:
-        loading = self._worker is not None
-        capturing = self._live_worker is not None
-        analyzing = self._stream_worker is not None
+        # QThread references can outlive the worker thread briefly while Qt
+        # delivers queued finished/deleteLater events. UI availability must
+        # follow the actual thread state, not whether the Python reference exists.
+        loading = self._worker is not None and self._worker.isRunning()
+        capturing = self._live_worker is not None and self._live_worker.isRunning()
+        analyzing = self._stream_worker is not None and self._stream_worker.isRunning()
         idle = not loading and not capturing and not analyzing
         has_interfaces = self.interface_combo.count() > 0
         has_selected_tcp = (
@@ -1154,7 +1157,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Saved {len(self._annotations):,} packet note(s) to {filename}")
 
     def follow_tcp_stream(self) -> None:
-        if self._stream_worker is not None:
+        if self._stream_worker is not None and self._stream_worker.isRunning():
             return
 
         packet = self._selected_packet
