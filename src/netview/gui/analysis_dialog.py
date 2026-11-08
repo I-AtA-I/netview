@@ -22,6 +22,13 @@ from netview.core.analysis import CaptureAnalysis, TrafficBucket, analyze_captur
 from netview.core.pipeline import ProcessedPacket
 
 
+def _time_label(timestamp: float) -> str:
+    try:
+        return datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
+    except (OverflowError, OSError, ValueError):
+        return f"{timestamp:.3g}"
+
+
 class TrafficTimeline(QWidget):
     def __init__(self, buckets: tuple[TrafficBucket, ...], parent=None):
         super().__init__(parent)
@@ -66,8 +73,8 @@ class TrafficTimeline(QWidget):
         painter.setPen(QColor("#91a5b2"))
         painter.drawText(4, chart.top() + 5, str(maximum))
         painter.drawText(4, chart.bottom(), "0")
-        first = datetime.fromtimestamp(self.buckets[0].start_timestamp).strftime("%H:%M:%S")
-        last = datetime.fromtimestamp(self.buckets[-1].end_timestamp).strftime("%H:%M:%S")
+        first = _time_label(self.buckets[0].start_timestamp)
+        last = _time_label(self.buckets[-1].end_timestamp)
         painter.drawText(chart.left(), chart.bottom() + 28, first)
         painter.drawText(
             chart.right() - 90, chart.bottom() + 28, last
@@ -280,8 +287,8 @@ class AnalysisDialog(QDialog):
         layout.addWidget(TrafficTimeline(self.analysis.traffic_buckets), 1)
         rows = []
         for bucket in self.analysis.traffic_buckets:
-            start = datetime.fromtimestamp(bucket.start_timestamp).strftime("%H:%M:%S")
-            end = datetime.fromtimestamp(bucket.end_timestamp).strftime("%H:%M:%S")
+            start = _time_label(bucket.start_timestamp)
+            end = _time_label(bucket.end_timestamp)
             rows.append((f"{start} – {end}", f"{bucket.packet_count:,}", self._format_bytes(bucket.byte_count)))
         layout.addWidget(self._table(["Interval", "Packets", "Bytes"], rows), 1)
         return page
