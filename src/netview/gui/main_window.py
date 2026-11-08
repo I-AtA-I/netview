@@ -122,6 +122,7 @@ class MainWindow(QMainWindow):
         self._live_worker: LiveCaptureWorker | None = None
         self._live_interface: str | None = None
         self._live_capture_error = False
+        self._live_capture_stopping = False
         self._current_path: Path | None = None
         self._selected_packet: ProcessedPacket | None = None
         self._annotations: dict[int, str] = {}
@@ -471,6 +472,13 @@ class MainWindow(QMainWindow):
         capturing = self._live_worker is not None and self._live_worker.isRunning()
         analyzing = self._stream_worker is not None and self._stream_worker.isRunning()
         idle = not loading and not capturing and not analyzing
+        # Once Stop has been requested, the worker may still be draining its
+        # final batch. Existing captured packets remain safe to inspect while
+        # that cleanup finishes; starting another capture or loading a file
+        # still waits for the worker to exit.
+        packet_tools_available = not loading and (
+            not capturing or self._live_capture_stopping
+        )
         has_interfaces = self.interface_combo.count() > 0
         has_selected_tcp = (
             self._selected_packet is not None
@@ -494,9 +502,15 @@ class MainWindow(QMainWindow):
         self.stop_capture_action.setEnabled(capturing)
         self.open_action.setEnabled(idle)
         self.close_action.setEnabled(idle and self.model.total_count > 0)
-        self.follow_stream_action.setEnabled(idle and has_selected_tcp)
-        self.statistics_action.setEnabled(idle and self.model.total_count > 0)
-        self.follow_stream_button.setEnabled(idle and has_selected_tcp)
+        self.follow_stream_action.setEnabled(
+            packet_tools_available and not analyzing and has_selected_tcp
+        )
+        self.statistics_action.setEnabled(
+            packet_tools_available and self.model.total_count > 0
+        )
+        self.follow_stream_button.setEnabled(
+            packet_tools_available and not analyzing and has_selected_tcp
+        )
         has_selection = self._selected_packet is not None
         self.mark_packet_action.setEnabled(idle and has_selection)
         self.clear_packet_note_action.setEnabled(
@@ -549,6 +563,7 @@ class MainWindow(QMainWindow):
         self.model.set_annotations(self._annotations)
         self._live_interface = interface
         self._live_capture_error = False
+        self._live_capture_stopping = False
         self.file_label.setText(f"Live capture · {interface}")
         self.filter_status.setStyleSheet("color: #91a5b2; font-size: 9pt;")
         self.filter_status.setText("Capturing live packets. Enter a display filter or leave it empty.")
@@ -615,7 +630,9 @@ class MainWindow(QMainWindow):
         self.stop_capture_action.setEnabled(False)
         self.capture_state_label.setText("Stopping live capture…")
         self.statusBar().showMessage("Stopping live capture…")
+        self._live_capture_stopping = True
         self._live_worker.stop()
+        self._update_capture_controls()
 
     def _on_live_packet_batch(self, packets: list[ProcessedPacket]) -> None:
         self.model.append_packets(packets)
@@ -638,6 +655,7 @@ class MainWindow(QMainWindow):
     def _on_live_capture_finished(self) -> None:
         interface = self._live_interface or "interface"
         self._live_worker = None
+        self._live_capture_stopping = False
         self._update_capture_controls()
 
         if not self._live_capture_error:
