@@ -1,0 +1,52 @@
+name: Verify and package NetView
+
+on:
+  push:
+    branches:
+      - feature/analytics-and-testing-tools
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Compile source
+        run: python -m compileall -q src
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest -q
+
+      - name: Create full source archive
+        run: |
+          mkdir -p dist
+          git archive --format=zip --prefix=NetView/ "$GITHUB_SHA" -o dist/NetView-full.zip
+
+      - name: Upload full project ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetView-full
+          path: dist/NetView-full.zip
+          if-no-files-found: error
+          retention-days: 14
