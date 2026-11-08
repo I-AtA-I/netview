@@ -11,6 +11,8 @@ NetView is a desktop network protocol analyzer built with Python and PySide6. It
 - Dissect TLS records plus ClientHello/ServerHello metadata such as SNI, ALPN, supported versions and cipher suites.
 - Identify common non-decoded Ethernet protocols such as LLDP, EAPOL, MPLS and PPPoE by EtherType.
 - Display packet metadata, protocol details and a raw hexadecimal/ASCII view.
+- Review capture-wide protocol, endpoint and port statistics in a dedicated overview.
+- Highlight protocol families and dissection warnings directly in the packet list.
 - Filter packets with the built-in display-filter language.
 - Load capture files in a background thread so the interface stays responsive during import.
 - Capture packets live from one manually selected network interface.
@@ -128,7 +130,7 @@ Live capture uses `dumpcap` on one interface selected by the user. Promiscuous m
 
 Only capture traffic on your own device and networks, or where you have explicit permission to monitor. Captured traffic may contain private information.
 
-The first GUI version loads packets into memory after reading them in batches. It keeps the UI responsive during import, but very large capture files can still consume substantial memory.
+The GUI uses a dedicated capture sidebar and a packet workspace with protocol-aware row accents, a decoded-layer inspector and a raw byte view. Capture statistics are calculated across the full capture and are independent of the active display filter. The application loads packets into memory after reading them in batches. It keeps the UI responsive during import, but very large capture files can still consume substantial memory.
 
 ## Project layout
 
