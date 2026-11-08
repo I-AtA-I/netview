@@ -642,6 +642,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"{state} on {interface} · {self.model.total_count:,} packets"
         )
+        self._update_capture_controls()
 
     def _on_live_capture_failed(self, message: str) -> None:
         self._live_capture_error = True
