@@ -1370,7 +1370,7 @@ class MainWindow(QMainWindow):
             save_annotations(filename, self._annotations)
         except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "Could not save packet notes", str(exc))
-            return
+            return False
         self._annotations_dirty = False
         self._update_capture_controls()
         self.statusBar().showMessage(f"Saved {len(self._annotations):,} packet note(s) to {filename}")

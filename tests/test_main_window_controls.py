@@ -126,3 +126,26 @@ def test_packet_tools_remain_available_during_live_capture(qtbot, monkeypatch):
     assert window.stop_capture_button.isEnabled()
 
     window.close()
+
+
+
+def test_load_capture_cancel_preserves_unsaved_notes(qtbot, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("netview.gui.main_window.list_interfaces", lambda: ["lo"])
+    window = MainWindow()
+    qtbot.addWidget(window)
+    current_path = Path("current.pcap")
+    window._current_path = current_path
+    window._annotations = {1: "unsaved note"}
+    window._annotations_dirty = True
+    monkeypatch.setattr(window, "_confirm_unsaved_annotations", lambda: False)
+
+    window.load_capture("next.pcap")
+
+    assert window._current_path == current_path
+    assert window._annotations == {1: "unsaved note"}
+    assert window._annotations_dirty
+
+    monkeypatch.setattr(window, "_confirm_unsaved_annotations", lambda: True)
+    window.close()
