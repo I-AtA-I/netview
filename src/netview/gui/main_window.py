@@ -31,6 +31,7 @@ from netview.gui.table_model import PacketTableModel
 from .live_worker import LiveCaptureWorker
 from .stream_dialog import TCPStreamDialog
 from .stream_worker import TCPStreamWorker
+from .statistics_dialog import StatisticsDialog
 from .worker import CaptureLoadWorker
 
 
@@ -168,6 +169,12 @@ class MainWindow(QMainWindow):
         capture_menu.addAction(self.stop_capture_action)
 
         analyze_menu = self.menuBar().addMenu("&Analyze")
+        self.statistics_action = QAction("Capture statistics", self)
+        self.statistics_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.statistics_action.triggered.connect(self.show_statistics)
+        self.statistics_action.setEnabled(False)
+        analyze_menu.addAction(self.statistics_action)
+        analyze_menu.addSeparator()
         self.follow_stream_action = QAction("Follow TCP Stream", self)
         self.follow_stream_action.setShortcut(QKeySequence("Ctrl+Shift+T"))
         self.follow_stream_action.triggered.connect(self.follow_tcp_stream)
@@ -397,6 +404,7 @@ class MainWindow(QMainWindow):
         self.open_action.setEnabled(idle)
         self.close_action.setEnabled(idle and self.model.total_count > 0)
         self.follow_stream_action.setEnabled(idle and has_selected_tcp)
+        self.statistics_action.setEnabled(idle and self.model.total_count > 0)
         self.follow_stream_button.setEnabled(idle and has_selected_tcp)
 
     def refresh_interfaces(self) -> None:
@@ -795,6 +803,13 @@ class MainWindow(QMainWindow):
         self.details_tree.expandToDepth(1)
         self.hex_view.setPlainText(self._format_hex(record.data))
         self._update_capture_controls()
+
+    def show_statistics(self) -> None:
+        packets = tuple(self.model.iter_packets())
+        if not packets:
+            return
+        dialog = StatisticsDialog(list(packets), self)
+        dialog.exec()
 
     def follow_tcp_stream(self) -> None:
         if self._stream_worker is not None:
