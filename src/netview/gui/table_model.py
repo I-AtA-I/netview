@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtGui import QColor, QFont
 
 from netview.core.pipeline import ProcessedPacket
 from netview.filters import CompiledFilter, compile_filter
@@ -63,6 +64,27 @@ class PacketTableModel(QAbstractTableModel):
             )
             if 0 <= index.column() < len(values):
                 return str(values[index.column()])
+
+        if role == Qt.ItemDataRole.ForegroundRole and index.column() == 4:
+            colors = {
+                "TCP": "#72c8e8",
+                "UDP": "#72e0d0",
+                "DNS": "#c6a6f2",
+                "mDNS": "#c6a6f2",
+                "LLMNR": "#c6a6f2",
+                "HTTP": "#e8bd75",
+                "TLS": "#8fb8ff",
+                "ARP": "#d7a7e8",
+                "ICMP": "#e59b86",
+                "ICMPv6": "#e59b86",
+                "IPv6": "#80c9c0",
+            }
+            return QColor("#e58d91" if packet.dissection.errors else colors.get(packet.protocol, "#a9bac3"))
+
+        if role == Qt.ItemDataRole.FontRole and index.column() == 4:
+            font = QFont()
+            font.setWeight(QFont.Weight.DemiBold)
+            return font
 
         if role == Qt.ItemDataRole.ToolTipRole:
             return (
