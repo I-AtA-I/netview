@@ -125,7 +125,6 @@ class _DirectionBuilder:
                 truncated_packet_numbers=tuple(self.truncated_packet_numbers),
             )
 
-
         segments = sorted(
             self.segments,
             key=lambda segment: segment.sequence_offset,
