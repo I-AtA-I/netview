@@ -1,5 +1,5 @@
 #define AppName "NetView"
-#define AppVersion "1.0.0"
+#define AppVersion "1.0.1"
 #define AppExeName "NetView.exe"
 #define BuildDir AddBackslash(SourcePath) + "..\src\netview\NetView.dist"
 #define OutputDirectory AddBackslash(SourcePath) + "..\dist\installer"
@@ -24,7 +24,7 @@ SetupIconFile={#IconPath}
 UninstallDisplayIcon={app}\{#AppExeName}
 OutputDir={#OutputDirectory}
 OutputBaseFilename=NetView-Setup-{#AppVersion}-x64
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=1.0.1.0
 VersionInfoDescription=NetView Setup
 VersionInfoProductName=NetView
 Compression=lzma2
