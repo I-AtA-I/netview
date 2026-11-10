@@ -4,6 +4,7 @@
 #define BuildDir AddBackslash(SourcePath) + "..\src\netview\NetView.dist"
 #define OutputDirectory AddBackslash(SourcePath) + "..\dist\installer"
 #define LicensePath AddBackslash(SourcePath) + "..\LICENSE"
+#define IconPath AddBackslash(SourcePath) + "..\assets\netview.ico"
 
 [Setup]
 AppId=NetView
@@ -17,8 +18,9 @@ DefaultDirName={localappdata}\Programs\NetView
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+SetupIconFile={#IconPath}
 UninstallDisplayIcon={app}\{#AppExeName}
 OutputDir={#OutputDirectory}
 OutputBaseFilename=NetView-Setup-{#AppVersion}-x64
