@@ -6,22 +6,32 @@ This installer packages the already-built Nuitka standalone folder. It does not 
 
 - Windows x64
 - A successful standalone build at `src/netview/NetView.dist`
+- The NetView icon at `assets/netview.ico`
 - Inno Setup 6.7.x (the installer script uses Inno Setup 6 syntax)
 
-Install Inno Setup 6 from its official download page:
+Install Inno Setup 6 from the official download page:
 https://jrsoftware.org/isdl.php
+
+## Application icon and GUI mode
+
+Use the same `assets/netview.ico` file for the Nuitka executable icon. In the `pysidedeploy.spec` file, set the `app.icon` value to the icon path and add `--windows-console-mode=disable` to `nuitka.extra_args`. The latter prevents a console window from opening for this GUI application. Rebuild the standalone folder before compiling the installer.
+
+The Inno Setup script uses the same icon for the installer and shortcuts inherit the embedded icon from `NetView.exe`.
 
 ## Build
 
 Run this from the repository root in PowerShell:
 
 ```powershell
-$iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+$iscc = Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"
+if (-not (Test-Path $iscc)) {
+    $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+}
 if (-not (Test-Path $iscc)) {
     $iscc = "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
 }
 if (-not (Test-Path $iscc)) {
-    throw "Inno Setup 6 compiler (ISCC.exe) was not found."
+    throw "Inno Setup compiler (ISCC.exe) was not found."
 }
 
 & $iscc ".\installer\NetView.iss"
@@ -32,7 +42,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Output:
 
-`dist/installer/NetView-Setup-1.0.0-x64.exe`
+`dist/installer/NetView-Setup-1.0.1-x64.exe`
 
 The installed application is named `NetView.exe`, although the current Nuitka standalone build produces `app.exe`. The installer renames that file when copying it; the original `NetView.dist` build folder is left untouched.
 
