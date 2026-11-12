@@ -15,3 +15,10 @@ captures/
 *.dist/
 *.build/
 *.onefile-build/
+
+# Local NetView build backups
+src/netview/NetView.dist.*/
+
+src/netview/NetView.dist.*/
+src/netview/capture/live.py.before-indent-fix
+src/netview/gui/live_worker.py.before-indent-fix

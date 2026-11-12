@@ -62,6 +62,6 @@ Opening existing PCAP/PCAPNG files does not require a capture driver. Live captu
 
 This is currently a local packaging/test path, not a public-release approval. Before distributing the installer:
 
-- Audit the licences and required notices for all bundled dependencies. In particular, Scapy 2.8.0 declares GPL-2.0-only; review the implications for distributing the compiled application or consider a compatible alternative.
+- Audit the licences and required notices for all bundled runtime dependencies before distribution.
 - Test installation, upgrade, launch, and uninstall on a clean Windows x64 machine.
 - For Microsoft Store submission of an EXE installer, meet the current Store requirements, including a silent-install path, an offline installer, and the required Authenticode signing of the installer and bundled PE files.

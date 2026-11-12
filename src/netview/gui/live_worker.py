@@ -245,6 +245,7 @@ class LiveCaptureWorker(QThread):
                         stdout=subprocess.PIPE,
                         stderr=stderr_file,
                         bufsize=0,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                     )
                 except OSError as exc:
                     self.capture_failed.emit(f"Could not start dumpcap: {exc}")

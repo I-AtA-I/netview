@@ -4,7 +4,7 @@ NetView is a desktop network protocol analyzer built with Python and PySide6. It
 
 ## Current features
 
-- Read classic PCAP and PCAPNG capture files.
+- Read classic PCAP and PCAPNG capture files with NetView's built-in reader, including multiple PCAPNG interfaces and timestamp resolutions.
 - Decode Ethernet II, VLAN, ARP, IPv4, IPv6, TCP, UDP, ICMP and ICMPv6 headers.
 - Dissect DNS over UDP/TCP, including questions and common A, AAAA, name, MX and TXT records.
 - Dissect HTTP/1.x request/response start lines and selected non-credential headers.
@@ -35,7 +35,6 @@ NetView is a desktop network protocol analyzer built with Python and PySide6. It
 
 - Python 3.10 or newer
 - PySide6 6.12 or newer
-- Scapy 2.8 or newer (used for PCAP/PCAPNG file reading)
 - `dumpcap` from Wireshark CLI (used for live capture)
 - On Windows, Npcap is required for live packet capture.
 
