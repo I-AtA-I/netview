@@ -437,7 +437,7 @@ def test_pcapng_supports_multiple_sections_and_byte_orders(tmp_path):
 
 def test_pcapng_rejects_truncated_section_header(tmp_path):
     path = tmp_path / "truncated-section.pcapng"
-    path.write_bytes(_PCAPNG_SHB + b"\x1c\x00\x00\x00")
+    path.write_bytes(b"\x0a\x0d\x0d\x0a" + b"\x1c\x00\x00\x00")
 
     with pytest.raises(PcapReadError, match="section header"):
         list(iter_capture_file(path))
@@ -445,7 +445,7 @@ def test_pcapng_rejects_truncated_section_header(tmp_path):
 
 def test_pcapng_rejects_invalid_byte_order_magic(tmp_path):
     path = tmp_path / "invalid-byte-order.pcapng"
-    path.write_bytes(_PCAPNG_SHB + b"\x1c\x00\x00\x00" + b"BAD!")
+    path.write_bytes(b"\x0a\x0d\x0d\x0a" + b"\x1c\x00\x00\x00" + b"BAD!")
 
     with pytest.raises(PcapReadError, match="byte-order magic"):
         list(iter_capture_file(path))
