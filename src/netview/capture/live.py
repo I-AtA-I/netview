@@ -190,6 +190,7 @@ def list_interface_details() -> list[tuple[str, str]]:
             encoding="utf-8",
             errors="replace",
             timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise LiveCaptureError(f"Could not run dumpcap: {exc}") from exc
