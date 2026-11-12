@@ -499,6 +499,7 @@ def _pcapng_packet(
 
 def _pcapng_simple_packet(
     payload: bytes,
+    byte_order: str,
     interfaces: list[_Interface],
     packet_number: int,
 ) -> PacketRecord:
@@ -509,7 +510,7 @@ def _pcapng_simple_packet(
             "PCAPNG Simple Packet Block appears before an interface description"
         )
 
-    original_length = struct.unpack_from("<I", payload, 0)[0]
+    original_length = struct.unpack_from(f"{byte_order}I", payload, 0)[0]
     interface = interfaces[0]
     captured_length = (
         min(original_length, interface.snaplen)
@@ -599,6 +600,7 @@ def _iter_pcapng(
             packet_number += 1
             yield _pcapng_simple_packet(
                 payload,
+                byte_order,
                 interfaces,
                 packet_number,
             )
